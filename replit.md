@@ -1,6 +1,6 @@
-# [Project name]
+# BUYME
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+BUYME is a local-first shop counter workspace for fast billing, inventory tracking, payment collection, customer outreach, and sales insights.
 
 ## Run & Operate
 
@@ -22,23 +22,32 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/buyme/src/App.tsx` — main BUYME application shell, local data model, billing flow, catalog CRUD, insights, notifications, broadcasts, settings, and receipt actions.
+- `artifacts/buyme/src/index.css` — BUYME visual system, responsive layout, typography, surfaces, and motion.
+- `attached_assets/buyme_1790444901078.html` — original standalone prototype used as the feature reference.
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The first build is frontend-only and local-first; shop data is persisted in browser localStorage so a shopkeeper can use the counter without account setup or a network connection.
+- The app keeps the original prototype's product surface but presents it as a responsive counter workspace with desktop navigation and a compact mobile navigation.
+- Payments and receipts are intentionally explicit user actions: cash/UPI, full/partial payment, receipt preview/print/download, and WhatsApp handoff are never auto-sent.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Billing: search products, select variants and quantities, manage the current bill, record cash or UPI payments, and produce a receipt.
+- Catalog: add, edit, and remove products with variants, units, prices, stock, and low-stock thresholds.
+- Insights: review revenue, bill count, payment mix, top sellers, and stock alerts by time range.
+- Notifications and outreach: review low-stock/trending alerts, save customers, and open WhatsApp messages with prefilled offers.
+- Settings: configure shop identity, theme, UPI/payment profiles, and GST details.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+No standing preferences recorded.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- BUYME data is stored only in the current browser profile until a server-backed account flow is added.
+- WhatsApp and receipt download actions hand off to the browser or external app; the app does not send messages automatically.
 
 ## Pointers
 

@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "BUYME"
+description = "A local-first shop manager for fast billing, inventory tracking, payment collection, customer outreach, and sales insights."
+version = "1.0.0"
+id = "artifacts/buyme"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18596
+
+[services.development]
+run = "pnpm --filter @workspace/buyme run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/buyme", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/buyme/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18596"
+BASE_PATH = "/"
