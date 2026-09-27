@@ -805,11 +805,16 @@ function ProductModal({ basic, product, draft, onClose, onSave, onDelete }: { ba
   };
   return <Modal title={product ? 'Edit product' : 'Add a product'} onClose={onClose}>
     <div className="space-y-4">
-      <label className="block cursor-pointer overflow-hidden rounded-xl border-2 border-dashed border-primary/30 bg-background text-center">
+      <div className="overflow-hidden rounded-xl border-2 border-dashed border-primary/30 bg-background text-center">
         <div className="relative mx-auto h-36 w-full max-w-48"><ProductArtwork product={form} className="h-full w-full rounded-xl" /></div>
-         <span className="block py-2 text-xs font-bold text-primary">{photoBusy ? 'Preparing photo...' : form.image ? 'Change product photo' : basic ? 'Add product photo (optional)' : 'Attach a product photo'}</span>
-        <input type="file" accept="image/*" onChange={(event) => uploadPhoto(event.target.files?.[0])} className="sr-only" data-testid="input-product-photo" />
-      </label>
+        <p className="py-2 text-xs font-bold text-primary">{photoBusy ? 'Preparing photo...' : form.image ? 'Change product photo' : basic ? 'Add product photo (optional)' : 'Attach a product photo'}</p>
+        <div className="flex justify-center gap-2 px-3 pb-3">
+          <label className="cursor-pointer rounded-lg border border-primary/30 bg-card px-3 py-2 text-xs font-bold text-primary" htmlFor="gallery-product-photo">Choose from gallery</label>
+          <input id="gallery-product-photo" type="file" accept="image/*" onChange={(event) => { uploadPhoto(event.target.files?.[0]); event.target.value = ''; }} className="sr-only" data-testid="input-product-photo" />
+          <label className="cursor-pointer rounded-lg bg-primary px-3 py-2 text-xs font-bold text-primary-foreground" htmlFor="camera-product-photo">Take picture</label>
+          <input id="camera-product-photo" type="file" accept="image/*" capture="environment" onChange={(event) => { uploadPhoto(event.target.files?.[0]); event.target.value = ''; }} className="sr-only" data-testid="input-product-camera" />
+        </div>
+      </div>
       <Field label="Product name"><input autoFocus value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Coconut Oil" className="field" data-testid="input-product-name" /></Field>
       <Field label="Category"><select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} className="field" data-testid="select-product-category">{categories.slice(1).map((item) => <option key={item}>{item}</option>)}{!categories.includes(form.category) && form.category !== 'Other' && <option>{form.category}</option>}<option>Other</option></select></Field>
       <div>
