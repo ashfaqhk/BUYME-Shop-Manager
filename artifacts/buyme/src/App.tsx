@@ -5,7 +5,8 @@ import BillingCalculator from './BillingCalculator';
 import CatalogScanDialog from './CatalogScanDialog';
 import type { ImportBillLine } from './list-import-types';
 import { createBillPdf, getUpiUri } from './billing-documents';
-import { prepareQrImage, validatePaymentQR, type PaymentQR } from './payment-profiles';
+import { accountUpiUri, prepareQrImage, validatePaymentQR, type PaymentQR } from './payment-profiles';
+import { roundMoney, roundQuantity, validQuantity } from './quantity-units';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -51,6 +52,7 @@ type BillLine = {
   variantId: string;
   name: string;
   variant: string;
+  unit?: string;
   qty: number;
   price: number;
 };
@@ -62,6 +64,7 @@ type Sale = {
   total: number;
   subtotal?: number;
   gst?: number;
+  discount?: number;
   paid: number;
   paymentMethod: PaymentMethod;
   paymentQr?: PaymentQR;
@@ -161,9 +164,9 @@ function App() {
   }, [toast]);
 
   const lowStock = useMemo(() => catalog.flatMap((product) => product.variants.map((variant) => ({ product, variant })).filter(({ variant }) => typeof variant.stock === 'number' && variant.stock <= (variant.threshold ?? 0))), [catalog]);
-  const billSubtotal = bill.reduce((sum, line) => sum + line.price * line.qty, 0);
-  const billGst = settings.gstEnabled ? Math.round(billSubtotal * settings.gstRate) / 100 : 0;
-  const billTotal = billSubtotal + billGst;
+  const billSubtotal = roundMoney(bill.reduce((sum, line) => sum + roundMoney(line.price * line.qty), 0));
+  const billGst = settings.gstEnabled ? roundMoney(billSubtotal * settings.gstRate / 100) : 0;
+  const billTotal = roundMoney(billSubtotal + billGst);
   const filteredProducts = useMemo(() => catalog.filter((product) =>
     `${product.name} ${product.category} ${product.variants.map((variant) => variant.name).join(' ')}`.toLowerCase().includes(search.trim().toLowerCase())
   ), [catalog, search]);
@@ -172,16 +175,16 @@ function App() {
   const changeSection = (section: Section) => { setActiveSection(section); setMobileNav(false); };
 
   const addToBill = (product: Product, variant: Variant, quantity = 1) => {
-    if (!Number.isSafeInteger(quantity) || quantity < 1) return false;
+    if (!validQuantity(quantity)) return false;
     const alreadyAdded = bill.filter((line) => line.productId === product.id && line.variantId === variant.id).reduce((sum, line) => sum + line.qty, 0);
-    if (typeof variant.stock === 'number' && alreadyAdded + quantity > variant.stock) {
+    if (typeof variant.stock === 'number' && alreadyAdded + quantity > variant.stock + 0.000001) {
       flash(`Only ${Math.max(0, variant.stock - alreadyAdded)} left in stock`);
       return false;
     }
     setBill((current) => {
       const existing = current.find((line) => line.lineId === `${product.id}-${variant.id}`);
-      if (existing) return current.map((line) => line.lineId === existing.lineId ? { ...line, qty: line.qty + quantity } : line);
-      return [...current, { lineId: `${product.id}-${variant.id}`, productId: product.id, variantId: variant.id, name: product.name, variant: variant.name, qty: quantity, price: variant.price }];
+      if (existing) return current.map((line) => line.lineId === existing.lineId ? { ...line, qty: roundQuantity(line.qty + quantity) } : line);
+      return [...current, { lineId: `${product.id}-${variant.id}`, productId: product.id, variantId: variant.id, name: product.name, variant: variant.name, unit: variant.unit, qty: roundQuantity(quantity), price: variant.price }];
     });
     flash(`${quantity} × ${product.name} added to bill`);
     return true;
@@ -203,7 +206,7 @@ function App() {
         const lineId = price === variant.price ? `${product.id}-${variant.id}` : `${product.id}-${variant.id}-${price.toFixed(2)}`;
         const existing = prepared.find((line) => line.lineId === lineId);
         if (existing) existing.qty += item.qty;
-        else prepared.push({ lineId, productId: product.id, variantId: variant.id, name: product.name, variant: variant.name, qty: item.qty, price });
+        else prepared.push({ lineId, productId: product.id, variantId: variant.id, name: product.name, variant: variant.name, unit: variant.unit, qty: item.qty, price });
       } else {
         const price = Math.round(item.price * 100) / 100;
         if (price <= 0) return `Enter a valid price for ${item.name}.`;
@@ -236,13 +239,13 @@ function App() {
     if (selected && amount > 0) {
       const variant = catalog.find((item) => item.id === selected.productId)?.variants.find((item) => item.id === selected.variantId);
       const alreadyAdded = bill.filter((line) => line.productId === selected.productId && line.variantId === selected.variantId).reduce((sum, line) => sum + line.qty, 0);
-      if (typeof variant?.stock === 'number' && alreadyAdded + amount > variant.stock) {
+      if (typeof variant?.stock === 'number' && alreadyAdded + amount > variant.stock + 0.000001) {
         flash('No more stock available');
         return;
       }
     }
     setBill((current) => current.flatMap((line) => line.lineId === lineId
-      ? (line.qty + amount > 0 ? [{ ...line, qty: line.qty + amount }] : [])
+      ? (roundQuantity(line.qty + amount) > 0 ? [{ ...line, qty: roundQuantity(line.qty + amount) }] : [])
       : [line]));
   };
 
@@ -276,12 +279,13 @@ function App() {
     return null;
   };
 
-  const completePayment = (method: PaymentMethod, paid: number, customer?: string, paymentQr?: PaymentQR) => {
-    const sale: Sale = { id: `BM-${Date.now().toString().slice(-6)}`, createdAt: new Date().toISOString(), lines: bill, subtotal: billSubtotal, gst: billGst, total: billTotal, paid, paymentMethod: method, paymentQr: method === 'UPI' ? paymentQr : undefined, customer };
+  const completePayment = (method: PaymentMethod, paid: number, discount: number, customer?: string, paymentQr?: PaymentQR) => {
+    const total = roundMoney(billTotal - discount);
+    const sale: Sale = { id: `BM-${Date.now().toString().slice(-6)}`, createdAt: new Date().toISOString(), lines: bill, subtotal: billSubtotal, gst: billGst, discount, total, paid, paymentMethod: method, paymentQr: method === 'UPI' ? paymentQr : undefined, customer };
     setSales((current) => [sale, ...current]);
     setCatalog((current) => current.map((product) => ({ ...product, variants: product.variants.map((variant) => {
       const sold = bill.filter((line) => line.productId === product.id && line.variantId === variant.id).reduce((sum, line) => sum + line.qty, 0);
-      return sold && typeof variant.stock === 'number' ? { ...variant, stock: Math.max(0, variant.stock - sold) } : variant;
+       return sold && typeof variant.stock === 'number' ? { ...variant, stock: Math.max(0, roundQuantity(variant.stock - sold)) } : variant;
     }) })));
     setBill([]);
     setSearch('');
@@ -611,6 +615,24 @@ function SettingsView({ settings, onSave }: { settings: ShopSettings; onSave: (s
   </div>;
 }
 
+function AccountQRPreview({ profile }: { profile: PaymentQR }) {
+  const uri = accountUpiUri(profile);
+  const [image, setImage] = useState('');
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    let active = true;
+    setImage('');
+    setError(false);
+    if (uri) QRCode.toDataURL(uri, { width: 256, margin: 1 })
+      .then((result) => { if (active) setImage(result); })
+      .catch(() => { if (active) setError(true); });
+    return () => { active = false; };
+  }, [uri]);
+  if (error) return <p role="alert" className="text-xs text-destructive">Could not generate account QR.</p>;
+  const src = uri ? image : profile.image;
+  return src ? <img src={src} alt={`${profile.label} receiving account QR`} className="size-24 shrink-0 rounded-lg bg-white p-1" data-testid={`image-account-qr-${profile.id}`} /> : <span className="flex size-24 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Smartphone size={22} /></span>;
+}
+
 function PaymentQRManager({ profiles, onChange }: { profiles: PaymentQR[]; onChange: (profiles: PaymentQR[]) => void }) {
   const empty = (): PaymentQR => ({ id: crypto.randomUUID(), label: '', upiId: '', upiName: '' });
   const [draft, setDraft] = useState<PaymentQR>(empty);
@@ -632,11 +654,11 @@ function PaymentQRManager({ profiles, onChange }: { profiles: PaymentQR[]; onCha
     finally { setUploading(false); }
   };
   return <div>
-    <h3 className="text-lg font-extrabold">Payment QR codes</h3>
-    <p className="mt-1 text-xs leading-5 text-muted-foreground">Save a Shop, Personal or other UPI account. Use an ID for an amount-specific QR, or upload a fixed QR image.</p>
+    <h3 className="text-lg font-extrabold">Receiving accounts & QR codes</h3>
+    <p className="mt-1 text-xs leading-5 text-muted-foreground">Add a receiving UPI ID here. Its account QR is generated automatically; the final bill QR uses the same account with the approved amount. An uploaded image is a separate fixed QR and its recipient cannot be verified here.</p>
     {profiles.length > 0 && <div className="mt-4 space-y-2">{profiles.map((profile) => <div key={profile.id} className="flex items-center gap-3 rounded-xl border border-border bg-background p-3">
-      {profile.image && !profile.upiId ? <img src={profile.image} alt="" className="h-12 w-12 rounded-lg object-contain" /> : <span className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary"><Smartphone size={20} /></span>}
-      <div className="min-w-0 flex-1"><p className="text-sm font-extrabold">{profile.label}</p><p className="truncate text-xs text-muted-foreground">{profile.upiId || 'Uploaded QR image'}</p></div>
+      <AccountQRPreview profile={profile} />
+      <div className="min-w-0 flex-1"><p className="text-sm font-extrabold">{profile.label}</p><p className="break-all text-xs text-muted-foreground">{profile.upiId || 'Uploaded fixed QR'}</p><p className="mt-1 text-[11px] text-muted-foreground">{profile.upiId ? 'Account QR · bill QR links to this UPI ID' : 'Confirm the recipient in the payment app'}{profile.upiId && profile.image ? ' · Uploaded image is ignored' : ''}</p></div>
       <button onClick={() => { setDraft(profile); setError(''); }} className="rounded-lg px-2 py-1 text-xs font-bold text-primary" data-testid={`button-edit-qr-${profile.id}`}>Edit</button>
       <button onClick={() => { if (window.confirm(`Remove ${profile.label} QR?`)) onChange(profiles.filter((item) => item.id !== profile.id)); }} className="rounded-lg p-2 text-destructive" aria-label={`Remove ${profile.label} QR`} data-testid={`button-remove-qr-${profile.id}`}><Trash2 size={16} /></button>
     </div>)}</div>}
@@ -718,32 +740,39 @@ function ProductModal({ product, draft, onClose, onSave, onDelete }: { product?:
   </Modal>;
 }
 
-function usePdfDownload(bill: Sale, settings: ShopSettings, kind: 'bill' | 'receipt') {
-  const [url, setUrl] = useState('');
+function usePdfDownload(bill: Sale, settings: ShopSettings, kind: 'bill' | 'receipt', enabled = true) {
+  const [prepared, setPrepared] = useState<{ url: string; bill: Sale; settings: ShopSettings; kind: 'bill' | 'receipt' } | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let active = true;
     let createdUrl = '';
-    setUrl('');
     setFailed(false);
+    if (!enabled) return;
     createBillPdf(bill, settings, kind).then((blob) => {
       createdUrl = URL.createObjectURL(blob);
-      if (active) setUrl(createdUrl);
+      if (active) setPrepared({ url: createdUrl, bill, settings, kind });
       else URL.revokeObjectURL(createdUrl);
     }).catch(() => { if (active) setFailed(true); });
     return () => {
       active = false;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [bill, settings, kind]);
-  return { url, failed };
+  }, [bill, settings, kind, enabled]);
+  return { url: enabled && prepared?.bill === bill && prepared.settings === settings && prepared.kind === kind ? prepared.url : '', failed };
 }
 
 function PaymentModal({ total, subtotal, gst, lines, settings, onSaveQR, onClose, onComplete }: {
   total: number; subtotal: number; gst: number; lines: BillLine[]; settings: ShopSettings;
   onSaveQR: (profile: PaymentQR) => void; onClose: () => void;
-  onComplete: (method: PaymentMethod, paid: number, customer?: string, paymentQr?: PaymentQR) => void;
+  onComplete: (method: PaymentMethod, paid: number, discount: number, customer?: string, paymentQr?: PaymentQR) => void;
 }) {
+  const [approved, setApproved] = useState(false);
+  const [discountType, setDiscountType] = useState<'amount' | 'percent'>('amount');
+  const [discountInput, setDiscountInput] = useState('');
+  const discountNumber = discountInput.trim() ? Number(discountInput) : 0;
+  const validDiscount = Number.isFinite(discountNumber) && discountNumber >= 0 && (discountType === 'percent' ? discountNumber <= 100 : discountNumber <= total);
+  const discount = validDiscount ? roundMoney(discountType === 'percent' ? total * discountNumber / 100 : discountNumber) : 0;
+  const finalTotal = roundMoney(total - discount);
   const [method, setMethod] = useState<PaymentMethod>('UPI');
   const [paid, setPaid] = useState(String(total));
   const [customer, setCustomer] = useState('');
@@ -754,7 +783,11 @@ function PaymentModal({ total, subtotal, gst, lines, settings, onSaveQR, onClose
   const [newQR, setNewQR] = useState<PaymentQR>({ id: crypto.randomUUID(), label: '', upiId: '', upiName: '' });
   const [newQRError, setNewQRError] = useState('');
   const [uploading, setUploading] = useState(false);
-  const paidValue = Math.round(Math.min(total, Math.max(0, Number(paid) || 0)) * 100) / 100;
+  const enteredPaid = Number(paid);
+  const validPaid = paid.trim() !== '' && Number.isFinite(enteredPaid) && enteredPaid >= 0
+    && enteredPaid <= finalTotal && (enteredPaid > 0 || finalTotal === 0)
+    && roundMoney(enteredPaid) === enteredPaid;
+  const paidValue = validPaid ? enteredPaid : 0;
   const chosen = settings.paymentQrs.find((profile) => profile.id === selectedId) ?? settings.paymentQrs[0];
   const paymentProfile = useMemo(() => ({
     ...settings,
@@ -762,8 +795,8 @@ function PaymentModal({ total, subtotal, gst, lines, settings, onSaveQR, onClose
     upiName: chosen?.upiName ?? '',
     qrImage: chosen?.image,
   }), [settings, chosen]);
-  const upiUri = method === 'UPI' ? getUpiUri(paymentProfile, paidValue) : null;
-  const qrData = method === 'UPI' ? upiUri ? generated?.uri === upiUri ? generated.image : '' : chosen?.image ?? '' : '';
+  const upiUri = approved && validPaid && method === 'UPI' ? getUpiUri(paymentProfile, paidValue) : null;
+  const qrData = approved && validPaid && method === 'UPI' ? upiUri ? generated?.uri === upiUri ? generated.image : '' : chosen?.image ?? '' : '';
 
   useEffect(() => {
     let active = true;
@@ -792,20 +825,33 @@ function PaymentModal({ total, subtotal, gst, lines, settings, onSaveQR, onClose
     finally { setUploading(false); }
   };
   const [draftDate] = useState(() => new Date().toISOString());
-  const draft = useMemo<Sale>(() => ({ id: 'DRAFT', createdAt: draftDate, lines, subtotal, gst, total, paid: paidValue, paymentMethod: method, paymentQr: chosen }), [draftDate, lines, subtotal, gst, total, paidValue, method, chosen]);
-  const pdf = usePdfDownload(draft, paymentProfile, 'bill');
+  const draft = useMemo<Sale>(() => ({ id: 'DRAFT', createdAt: draftDate, lines, subtotal, gst, discount, total: finalTotal, paid: paidValue, paymentMethod: method, paymentQr: chosen }), [draftDate, lines, subtotal, gst, discount, finalTotal, paidValue, method, chosen]);
+  const pdf = usePdfDownload(draft, paymentProfile, 'bill', approved && validPaid);
 
-  return <Modal title="Payment & PDF" onClose={onClose} wide>
-    <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_250px]">
+  return <Modal title={approved ? 'Approved bill & payment QR' : 'Seller review & discount'} onClose={onClose} large>
+    {!approved ? <div className="space-y-5" data-testid="stage-seller-review">
+      <p className="text-sm text-muted-foreground">Review the bill and apply any discount before approving it. The PDF and QR are made only after approval.</p>
+      <div className="max-h-[35dvh] space-y-2 overflow-y-auto rounded-xl border border-border p-4">{lines.map((line) => <div key={line.lineId} className="flex justify-between gap-3 text-sm"><span>{line.name} · {line.variant} × {line.qty} {line.unit}</span><strong>{money(roundMoney(line.price * line.qty))}</strong></div>)}</div>
+      <div className="grid gap-3 rounded-xl bg-muted/55 p-4 sm:grid-cols-[1fr_auto_auto] sm:items-end">
+        <Field label="Discount"><input type="number" min="0" max={discountType === 'percent' ? 100 : total} step="0.01" inputMode="decimal" value={discountInput} onChange={(event) => setDiscountInput(event.target.value)} placeholder="0" className="field" data-testid="input-bill-discount" /></Field>
+        <select aria-label="Discount type" value={discountType} onChange={(event) => setDiscountType(event.target.value as 'amount' | 'percent')} className="field sm:w-32" data-testid="select-discount-type"><option value="amount">₹ off</option><option value="percent">% off</option></select>
+        <div className="text-right"><p className="text-xs text-muted-foreground">Final amount</p><strong className="text-3xl font-extrabold text-primary" data-testid="text-discounted-total">{validDiscount ? money(finalTotal) : '—'}</strong></div>
+      </div>
+      {!validDiscount && <p role="alert" className="text-xs font-bold text-destructive">Enter a discount between 0 and {discountType === 'percent' ? '100%' : money(total)}.</p>}
+      <div className="text-sm text-muted-foreground">Subtotal {money(subtotal)}{gst > 0 && ` · GST ${money(gst)}`} · Discount {money(discount)}</div>
+      <div className="flex justify-end gap-2 border-t border-border pt-4"><button onClick={onClose} className="rounded-xl px-4 py-3 text-sm font-bold">Back to bill</button><button onClick={() => { setPaid(String(finalTotal)); if (finalTotal === 0) setMethod('Cash'); setApproved(true); }} disabled={!validDiscount || !lines.length} className="rounded-xl bg-primary px-5 py-3 text-sm font-extrabold text-primary-foreground disabled:opacity-40" data-testid="button-approve-bill"><Check size={17} className="mr-2 inline" /> Approve final bill</button></div>
+    </div> : <>
+    <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_330px]" data-testid="stage-approved-payment">
       <div>
-        <div className="rounded-xl bg-muted/55 p-4"><p className="text-xs font-bold text-muted-foreground">{lines.reduce((sum, line) => sum + line.qty, 0)} items in this bill</p><div className="mt-2 flex items-end justify-between"><span className="text-sm font-bold">Total to collect</span><span className="text-3xl font-extrabold text-primary" data-testid="text-payment-total">{money(total)}</span></div>{gst > 0 && <p className="mt-2 text-xs text-muted-foreground">Includes {money(gst)} GST</p>}</div>
-        <div className="mt-3 max-h-36 space-y-1 overflow-auto rounded-xl border border-border p-3">{lines.map((line) => <div key={line.lineId} className="flex justify-between gap-2 text-xs"><span>{line.name} · {line.variant} × {line.qty}</span><strong>{money(line.price * line.qty)}</strong></div>)}</div>
+        <div className="rounded-xl bg-muted/55 p-5"><p className="text-xs font-bold text-muted-foreground">Seller-approved bill</p><div className="mt-2 flex items-end justify-between"><span className="text-base font-bold">Total to collect</span><span className="text-4xl font-extrabold text-primary" data-testid="text-payment-total">{money(finalTotal)}</span></div><p className="mt-2 text-xs text-muted-foreground">Subtotal {money(subtotal)}{gst > 0 && ` · GST ${money(gst)}`}{discount > 0 && ` · Discount −${money(discount)}`}</p></div>
+        <div className="mt-3 max-h-56 space-y-2 overflow-auto rounded-xl border border-border p-4">{lines.map((line) => <div key={line.lineId} className="flex justify-between gap-2 text-sm"><span>{line.name} · {line.variant} × {line.qty} {line.unit}</span><strong>{money(roundMoney(line.price * line.qty))}</strong></div>)}</div>
         <p className="mb-2 mt-5 text-xs font-bold">Payment method</p>
         <div className="grid grid-cols-2 gap-2"><button onClick={() => setMethod('UPI')} className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-sm font-extrabold ${method === 'UPI' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`} data-testid="button-payment-upi"><Smartphone size={17} /> UPI / QR</button><button onClick={() => setMethod('Cash')} className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-sm font-extrabold ${method === 'Cash' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`} data-testid="button-payment-cash"><Banknote size={17} /> Cash</button></div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2"><Field label="Amount received"><div className="relative"><IndianRupee size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input type="number" min="0" max={total} step="0.01" value={paid} onChange={(event) => setPaid(event.target.value)} className="field pl-8" data-testid="input-payment-amount" /></div></Field><Field label="Customer number (optional)"><input value={customer} onChange={(event) => setCustomer(event.target.value)} placeholder="91..." className="field" data-testid="input-payment-customer" /></Field></div>
-        {paidValue < total && <p className="mt-2 text-xs font-bold text-accent">{money(total - paidValue)} will remain due after saving.</p>}
+        <div className="mt-4 grid gap-3 sm:grid-cols-2"><Field label="Amount received"><div className="relative"><IndianRupee size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input type="number" min="0" max={finalTotal} step="0.01" value={paid} onChange={(event) => setPaid(event.target.value)} className="field pl-8" data-testid="input-payment-amount" /></div></Field><Field label="Customer number (optional)"><input value={customer} onChange={(event) => setCustomer(event.target.value)} placeholder="91..." className="field" data-testid="input-payment-customer" /></Field></div>
+        {!validPaid && <p role="alert" className="mt-2 text-xs font-bold text-destructive">Enter an amount from ₹{finalTotal === 0 ? '0' : '0.01'} to {money(finalTotal)} with at most two decimal places.</p>}
+        {paidValue < finalTotal && <p className="mt-2 text-xs font-bold text-accent">{money(roundMoney(finalTotal - paidValue))} will remain due after saving.</p>}
         {method === 'UPI' && <>
-          <div className="mb-2 mt-5 flex items-center justify-between"><p className="text-xs font-extrabold">Choose payment QR</p><button onClick={() => setAddingQR((current) => !current)} className="text-xs font-bold text-primary" data-testid="button-add-qr-checkout">{addingQR ? 'Cancel' : '+ Add QR now'}</button></div>
+           <div className="mb-2 mt-5 flex items-center justify-between"><p className="text-xs font-extrabold">Receiving account · change QR here</p><button onClick={() => setAddingQR((current) => !current)} className="text-xs font-bold text-primary" data-testid="button-add-qr-checkout">{addingQR ? 'Cancel' : '+ Add QR now'}</button></div>
           <div className="flex flex-wrap gap-2">{settings.paymentQrs.map((profile) => <button key={profile.id} onClick={() => setSelectedId(profile.id)} aria-pressed={chosen?.id === profile.id} className={`rounded-xl border px-3 py-2 text-xs font-bold ${chosen?.id === profile.id ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card'}`} data-testid={`button-select-qr-${profile.id}`}>{profile.label}</button>)}</div>
           {addingQR && <div className="mt-3 space-y-3 rounded-xl border border-primary/20 bg-background p-3">
             <div className="grid gap-2 sm:grid-cols-2"><Field label="QR name"><input value={newQR.label} onChange={(event) => setNewQR({ ...newQR, label: event.target.value })} className="field" placeholder="Shop / Personal" data-testid="input-checkout-qr-label" /></Field><Field label="UPI ID or upload image"><input value={newQR.upiId} onChange={(event) => setNewQR({ ...newQR, upiId: event.target.value })} className="field" placeholder="yourname@bank" data-testid="input-checkout-upi-id" /></Field><Field label="Recipient name"><input value={newQR.upiName} onChange={(event) => setNewQR({ ...newQR, upiName: event.target.value })} className="field" placeholder="Name on UPI apps" data-testid="input-checkout-upi-name" /></Field><label className="flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-primary/40 px-3 py-2 text-xs font-bold text-primary">{uploading ? 'Preparing...' : newQR.image ? 'QR image attached' : 'Upload fixed QR'}<input type="file" accept="image/*" onChange={(event) => uploadQR(event.target.files?.[0])} className="sr-only" data-testid="input-checkout-qr-image" /></label></div>
@@ -814,28 +860,29 @@ function PaymentModal({ total, subtotal, gst, lines, settings, onSaveQR, onClose
           </div>}
         </>}
       </div>
-      <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-background p-4 text-center">
-        {method === 'Cash' ? <><Banknote size={48} className="text-primary" /><h3 className="mt-4 text-base font-extrabold">Cash payment</h3></> : qrError ? <p className="text-sm font-bold text-destructive">Could not generate this QR. Choose another account.</p> : qrData ? <><img src={qrData} alt={`${chosen?.label || 'UPI'} QR for ${money(paidValue)}`} className="h-44 w-44 rounded-xl bg-white p-2 object-contain" data-testid="image-payment-qr" /><p className="mt-3 text-sm font-extrabold">{upiUri ? `Scan to pay ${money(paidValue)}` : `Scan QR · enter ${money(paidValue)}`}</p><p className="mt-1 break-all text-xs text-muted-foreground">{chosen?.label} {chosen?.upiId && `· ${chosen.upiId}`}</p>{!upiUri && <p className="mt-2 text-[11px] leading-4 text-accent">Fixed QR: confirm recipient and amount in the UPI app.</p>}</> : upiUri ? <p className="text-sm text-muted-foreground">Generating QR...</p> : <><Smartphone size={40} className="text-primary" /><h3 className="mt-3 text-sm font-extrabold">Add a payment QR</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">Add a UPI ID or upload a QR above, then select it here.</p></>}
+       <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-background p-4 text-center">
+         {method === 'Cash' ? <><Banknote size={48} className="text-primary" /><h3 className="mt-4 text-base font-extrabold">{finalTotal === 0 ? 'No payment due' : 'Cash payment'}</h3></> : qrError ? <p className="text-sm font-bold text-destructive">Could not generate this QR. Choose another account.</p> : qrData ? <><img src={qrData} alt={`${chosen?.label || 'UPI'} QR for ${money(paidValue)}`} className="size-64 rounded-xl bg-white p-2 object-contain sm:size-72" data-testid="image-payment-qr" /><p className="mt-3 text-lg font-extrabold">{upiUri ? `Scan to pay ${money(paidValue)}` : `Scan QR · enter ${money(paidValue)}`}</p><p className="mt-1 break-all text-xs text-muted-foreground">{chosen?.label} {chosen?.upiId && `· ${chosen.upiId}`}</p>{!upiUri && <p className="mt-2 text-[11px] leading-4 text-accent">Fixed QR: confirm recipient and amount in the UPI app. This image is not automatically linked to a UPI ID.</p>}</> : upiUri ? <p className="text-sm text-muted-foreground">Generating QR...</p> : <><Smartphone size={40} className="text-primary" /><h3 className="mt-3 text-sm font-extrabold">Add a receiving account</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">Add a UPI ID or upload a fixed QR above, then select it here.</p></>}
       </div>
     </div>
     <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-border pt-4">
       <button onClick={onClose} className="rounded-xl px-4 py-2.5 text-xs font-bold text-muted-foreground" data-testid="button-cancel-payment">Back</button>
-      {pdf.url ? <><a href={pdf.url} download="bill-draft.pdf" className="flex items-center gap-2 rounded-xl border border-primary px-4 py-2.5 text-xs font-extrabold text-primary" data-testid="button-download-bill-pdf"><Download size={15} /> Download bill PDF</a><a href={pdf.url} target="_blank" rel="noopener noreferrer" className="flex items-center rounded-xl px-3 py-2.5 text-xs font-bold text-primary" data-testid="link-open-bill-pdf">Open PDF</a></> : <span className={`flex items-center rounded-xl border border-border px-4 py-2.5 text-xs font-bold ${pdf.failed ? 'text-destructive' : 'text-muted-foreground'}`}>{pdf.failed ? 'Could not prepare PDF' : 'Preparing PDF...'}</span>}
-      <button onClick={() => onComplete(method, paidValue, customer || undefined, chosen)} disabled={!total || paidValue <= 0 || (method === 'UPI' && (!qrData || qrError))} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40" data-testid="button-confirm-payment"><Check size={15} /> Save payment</button>
+       {pdf.url ? <><a href={pdf.url} download="bill-draft.pdf" className="flex items-center gap-2 rounded-xl border border-primary px-4 py-2.5 text-xs font-extrabold text-primary" data-testid="button-download-bill-pdf"><Download size={15} /> Download bill PDF</a><a href={pdf.url} target="_blank" rel="noopener noreferrer" className="flex items-center rounded-xl px-3 py-2.5 text-xs font-bold text-primary" data-testid="link-open-bill-pdf">Open PDF</a></> : <span className={`flex items-center rounded-xl border border-border px-4 py-2.5 text-xs font-bold ${pdf.failed ? 'text-destructive' : 'text-muted-foreground'}`}>{!validPaid ? 'Enter a valid amount for the PDF' : pdf.failed ? 'Could not prepare PDF' : 'Preparing PDF...'}</span>}
+       <button onClick={() => onComplete(method, paidValue, discount, customer || undefined, chosen)} disabled={!validPaid || !pdf.url || (method === 'UPI' && (!qrData || qrError))} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40" data-testid="button-confirm-payment"><Check size={15} /> {finalTotal === 0 ? 'Save bill' : 'Save payment'}</button>
     </div>
+    </>}
   </Modal>;
 }
 
 function ReceiptModal({ sale, settings, onClose }: { sale: Sale; settings: ShopSettings; onClose: () => void }) {
   const subtotal = sale.subtotal ?? sale.lines.reduce((sum, line) => sum + line.price * line.qty, 0);
-  const gst = sale.gst ?? Math.max(0, sale.total - subtotal);
+  const gst = sale.gst ?? Math.max(0, sale.total + (sale.discount ?? 0) - subtotal);
   const receiptProfile = useMemo(() => ({ ...settings, upiId: sale.paymentQr?.upiId ?? '', upiName: sale.paymentQr?.upiName ?? '', qrImage: sale.paymentQr?.image }), [settings, sale.paymentQr]);
   const pdf = usePdfDownload(sale, receiptProfile, 'receipt');
   return <Modal title="Bill saved" onClose={onClose}>
     <div className="receipt-paper print-receipt rounded-xl border border-border p-5">
       <div className="text-center"><div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-lg font-extrabold text-primary-foreground">B</div><h3 className="mt-3 text-lg font-extrabold">{settings.shopName}</h3><p className="text-[10px] text-slate-500">{settings.phone}</p><p className="mt-3 border-y border-dashed border-slate-300 py-2 font-mono text-[10px] text-slate-500">{sale.id} · {dateLabel(sale.createdAt)}</p></div>
       <div className="mt-4 space-y-2">{sale.lines.map((line) => <div key={line.lineId} className="flex justify-between gap-3 text-xs"><span>{line.name} ({line.variant}) <small className="text-slate-500">× {line.qty}</small></span><span className="font-mono">{money(line.price * line.qty)}</span></div>)}</div>
-      <div className="mt-4 space-y-1 border-t border-slate-300 pt-3"><div className="flex justify-between text-xs"><span>Subtotal</span><span>{money(subtotal)}</span></div>{gst > 0 && <div className="flex justify-between text-xs"><span>GST</span><span>{money(gst)}</span></div>}<div className="flex justify-between text-sm font-extrabold"><span>Total</span><span>{money(sale.total)}</span></div><div className="flex justify-between text-[10px] text-slate-500"><span>{sale.paymentMethod} received</span><span>{money(sale.paid)}</span></div>{sale.paid < sale.total && <div className="flex justify-between text-[10px] font-bold text-slate-600"><span>Balance due</span><span>{money(sale.total - sale.paid)}</span></div>}</div>
+      <div className="mt-4 space-y-1 border-t border-slate-300 pt-3"><div className="flex justify-between text-xs"><span>Subtotal</span><span>{money(subtotal)}</span></div>{gst > 0 && <div className="flex justify-between text-xs"><span>GST</span><span>{money(gst)}</span></div>}{!!sale.discount && <div className="flex justify-between text-xs"><span>Discount</span><span>−{money(sale.discount)}</span></div>}<div className="flex justify-between text-sm font-extrabold"><span>Total</span><span>{money(sale.total)}</span></div><div className="flex justify-between text-[10px] text-slate-500"><span>{sale.paymentMethod} received</span><span>{money(sale.paid)}</span></div>{sale.paid < sale.total && <div className="flex justify-between text-[10px] font-bold text-slate-600"><span>Balance due</span><span>{money(roundMoney(sale.total - sale.paid))}</span></div>}</div>
     </div>
     <div className="mt-5 flex gap-2"><button onClick={() => window.print()} className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-border py-2.5 text-xs font-bold" data-testid="button-print-receipt"><Printer size={15} /> Print</button>{pdf.url ? <a href={pdf.url} download={`receipt-${sale.id}.pdf`} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-download-receipt"><Download size={15} /> Download PDF</a> : <span className={`flex flex-1 items-center justify-center rounded-xl px-3 text-xs font-bold ${pdf.failed ? 'text-destructive' : 'text-muted-foreground'}`}>{pdf.failed ? 'Could not prepare PDF' : 'Preparing PDF...'}</span>}</div>
     {pdf.url && <p className="mt-3 text-center text-xs text-muted-foreground">Download blocked? <a href={pdf.url} target="_blank" rel="noopener noreferrer" className="font-bold text-primary underline" data-testid="link-open-receipt-pdf">Open the PDF</a> to save it from your browser.</p>}
@@ -853,8 +900,8 @@ function BroadcastModal({ settings, onClose, onDone }: { settings: ShopSettings;
   return <Modal title="Start a broadcast" onClose={onClose}><div className="space-y-4"><div className="rounded-xl bg-chart-3/10 p-3 text-xs leading-5 text-chart-3"><MessageCircleMore className="mb-1" size={16} /> WhatsApp will open with your message ready. BUYME never sends it without you.</div><Field label="Customer phone number"><div className="relative"><Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input autoFocus value={number} onChange={(e) => setNumber(e.target.value)} placeholder="+91 98765 43210" className="field pl-8" data-testid="input-broadcast-number" /></div></Field><Field label="Message"><textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={5} className="field resize-none leading-5" data-testid="input-broadcast-message" /></Field><button onClick={send} disabled={!number.trim()} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-chart-3 text-xs font-extrabold text-white disabled:opacity-40" data-testid="button-send-broadcast"><Send size={16} /> Open WhatsApp</button></div></Modal>;
 }
 
-function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
-  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/30 p-0 backdrop-blur-sm sm:items-center sm:p-4"><div className={`max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl border border-border bg-card p-5 shadow-[0_25px_70px_rgba(36,31,61,.2)] sm:rounded-2xl sm:p-6 ${wide ? 'max-w-2xl' : 'max-w-md'}`} role="dialog" aria-modal="true"><div className="mb-5 flex items-center justify-between"><h2 className="text-lg font-extrabold">{title}</h2><button onClick={onClose} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="button-close-modal"><X size={18} /></button></div>{children}</div></div>;
+function Modal({ title, onClose, children, wide, large }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; large?: boolean }) {
+  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/30 p-0 backdrop-blur-sm sm:items-center sm:p-4"><div className={`max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl border border-border bg-card p-5 shadow-[0_25px_70px_rgba(36,31,61,.2)] sm:rounded-2xl sm:p-6 ${large ? 'max-w-5xl' : wide ? 'max-w-2xl' : 'max-w-md'}`} role="dialog" aria-modal="true" aria-label={title}><div className="mb-5 flex items-center justify-between"><h2 className="text-lg font-extrabold">{title}</h2><button onClick={onClose} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="button-close-modal"><X size={18} /></button></div>{children}</div></div>;
 }
 
 function EmptyState({ icon: Icon, title, description, action, onAction }: { icon: typeof ShoppingBag; title: string; description: string; action: string; onAction: () => void }) {

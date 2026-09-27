@@ -10,6 +10,15 @@ export function validUpiId(value: string): boolean {
   return /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+$/.test(value.trim());
 }
 
+export function accountUpiUri(profile: Pick<PaymentQR, 'upiId' | 'upiName' | 'label'>): string | null {
+  if (!validUpiId(profile.upiId)) return null;
+  return `upi://pay?${new URLSearchParams({
+    pa: profile.upiId.trim(),
+    pn: profile.upiName.trim() || profile.label || 'Shop',
+    cu: 'INR',
+  }).toString()}`;
+}
+
 export function validatePaymentQR(profile: PaymentQR): string | null {
   if (!profile.label.trim()) return 'Name this QR, such as Shop or Personal.';
   if (profile.upiId.trim() && !validUpiId(profile.upiId)) return 'Enter a valid UPI ID or remove it and attach a QR image.';

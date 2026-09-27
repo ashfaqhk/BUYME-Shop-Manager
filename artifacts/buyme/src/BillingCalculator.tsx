@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Check, FilePlus2, Minus, Package, Plus, Search, 
 import type { Product, Variant } from './catalog-data';
 import type { ImportBillLine } from './list-import-types';
 import ListImportDialog from './ListImportDialog';
+import { initialQuantity, quantityStep, roundMoney, roundQuantity, validQuantity as isValidQuantity } from './quantity-units';
 
 export type CalculatorBillLine = {
   lineId: string;
@@ -10,6 +11,7 @@ export type CalculatorBillLine = {
   variantId: string;
   name: string;
   variant: string;
+  unit?: string;
   qty: number;
   price: number;
 };
@@ -66,11 +68,12 @@ export default function BillingCalculator({
   const catalogScrollRef = useRef({ x: 0, y: 0 });
   const selectedProduct = products.find((product) => product.id === selectedId);
   const variant = selectedProduct?.variants.find((item) => item.id === variantId);
-  const itemCount = bill.reduce((sum, line) => sum + line.qty, 0);
+  const itemCount = bill.length;
   const parsedQuantity = Number(quantity);
-  const validQuantity = Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0 && quantity.trim() !== '';
+  const validQuantity = isValidQuantity(parsedQuantity) && quantity.trim() !== '';
+  const step = quantityStep(variant?.unit ?? '');
 
-  const remainingStock = (product: Product, item: Variant) => item.stock === undefined ? undefined : Math.max(0, item.stock - bill.filter((line) => line.productId === product.id && line.variantId === item.id).reduce((sum, line) => sum + line.qty, 0));
+   const remainingStock = (product: Product, item: Variant) => item.stock === undefined ? undefined : Math.max(0, roundQuantity(item.stock - bill.filter((line) => line.productId === product.id && line.variantId === item.id).reduce((sum, line) => sum + line.qty, 0)));
   const variantAvailable = (product: Product, item: Variant) => remainingStock(product, item) === undefined || remainingStock(product, item)! > 0;
   const isSoldOut = (product: Product) => product.variants.length > 0 && product.variants.every((item) => remainingStock(product, item) === 0);
   const stockBadge = (product: Product, item: Variant | undefined) => item && remainingStock(product, item) !== undefined && remainingStock(product, item)! <= (item.threshold ?? 5);
@@ -125,8 +128,9 @@ export default function BillingCalculator({
     openerRef.current = button;
     catalogScrollRef.current = { x: window.scrollX, y: window.scrollY };
     setSelectedId(product.id);
-    setVariantId(product.variants.filter((item) => variantAvailable(product, item)).sort((a, b) => a.price - b.price)[0]?.id ?? null);
-    setQuantity('1');
+    const first = product.variants.filter((item) => variantAvailable(product, item)).sort((a, b) => a.price - b.price)[0];
+    setVariantId(first?.id ?? null);
+    setQuantity(String(initialQuantity(first?.unit ?? 'piece')));
     setAddError(false);
   }
 
@@ -150,8 +154,8 @@ export default function BillingCalculator({
 
   return (
     <section className="min-h-[60dvh] pb-40 font-sans text-foreground lg:pb-28" aria-label="Billing calculator">
-      {view !== 'review' && <div className="mb-5 flex items-end justify-between gap-4 rounded-2xl border border-primary/15 bg-primary px-5 py-4 text-primary-foreground shadow-[var(--shadow-sm)] sm:mb-7 sm:px-7 sm:py-5" aria-label="Current bill total" data-testid="panel-calculator-total">
-        <div className="min-w-0"><p className="text-[10px] font-extrabold uppercase tracking-[.2em] opacity-75">Current bill · {itemCount} {itemCount === 1 ? 'item' : 'items'}</p><strong className="mt-1 block text-4xl font-extrabold leading-none tracking-tight tabular-nums sm:text-5xl" data-testid="text-running-total" aria-live="polite">{money(total)}</strong></div>
+      {view !== 'review' && <div className="sticky top-0 z-20 mb-4 flex items-end justify-between gap-4 rounded-xl border border-primary/15 bg-primary px-4 py-3 text-primary-foreground shadow-[var(--shadow-sm)] sm:mb-6 sm:px-6 sm:py-4" aria-label="Current bill total" data-testid="panel-calculator-total">
+        <div className="min-w-0"><p className="text-[9px] font-extrabold uppercase tracking-[.16em] opacity-75">Current bill · {roundQuantity(itemCount)} {itemCount === 1 ? 'item' : 'items'}</p><strong className="mt-1 block text-3xl font-extrabold leading-none tracking-tight tabular-nums sm:text-4xl" data-testid="text-running-total" aria-live="polite">{money(total)}</strong></div>
         <span className="hidden shrink-0 pb-1 text-right text-[11px] font-semibold opacity-70 sm:block">Add items below<br />Review before payment</span>
       </div>}
       {view === 'products' && (
@@ -219,34 +223,36 @@ export default function BillingCalculator({
                     role="radio"
                     aria-checked={variantId === option.id}
                      disabled={!variantAvailable(selectedProduct, option)}
-                    onClick={() => { setVariantId(option.id); setAddError(false); }}
-                    className={`overflow-hidden rounded-xl border-2 text-left transition-[border-color,background-color] disabled:cursor-not-allowed disabled:opacity-45 ${variantId === option.id ? 'border-primary bg-primary/8' : 'border-border bg-card hover:border-primary/40'}`}
+                     onClick={() => { setVariantId(option.id); setQuantity(String(initialQuantity(option.unit))); setAddError(false); }}
+                     className={`overflow-hidden rounded-lg border-2 text-left transition-[border-color,background-color] disabled:cursor-not-allowed disabled:opacity-45 ${variantId === option.id ? 'border-primary bg-primary/8' : 'border-border bg-card hover:border-primary/40'}`}
                      aria-label={`${option.name}, ${money(option.price)} per ${option.unit}${!variantAvailable(selectedProduct, option) ? ', out of stock' : ''}`}
                     data-testid={`button-variant-${option.id}`}
                   >
-                    <ProductPhoto product={{ ...selectedProduct, image: option.image || selectedProduct.image }} className="aspect-[2.2] w-full" />
-                     <span className="block p-2.5"><span className="flex items-start justify-between gap-1"><span className="text-xs font-extrabold leading-4">{option.name}</span>{variantId === option.id && <Check size={15} className="shrink-0 text-primary" aria-hidden="true" />}</span><span className="mt-1 block text-sm font-extrabold text-primary">{money(option.price)} <span className="text-[10px] font-medium text-muted-foreground">/ {option.unit}</span></span><span className="mt-1 block text-[10px] font-bold text-muted-foreground">{option.stock === undefined ? 'Available' : remainingStock(selectedProduct, option) === 0 ? 'Out of stock' : `${remainingStock(selectedProduct, option)} left`}</span></span>
+                     <ProductPhoto product={{ ...selectedProduct, image: option.image || selectedProduct.image }} className="aspect-[3.3] w-full" />
+                      <span className="block p-2"><span className="flex items-start justify-between gap-1"><span className="text-[11px] font-extrabold leading-4">{option.name}</span>{variantId === option.id && <Check size={13} className="shrink-0 text-primary" aria-hidden="true" />}</span><span className="mt-0.5 block text-xs font-extrabold text-primary">{money(option.price)} <span className="text-[10px] font-medium text-muted-foreground">/ {option.unit}</span></span><span className="block text-[9px] font-bold text-muted-foreground">{option.stock === undefined ? 'Available' : remainingStock(selectedProduct, option) === 0 ? 'Out of stock' : `${roundQuantity(remainingStock(selectedProduct, option) ?? 0)} left`}</span></span>
                   </button>
                 ))}
               </div>
-              <label htmlFor="calculator-quantity" className="mt-4 block text-xs font-extrabold uppercase tracking-[0.12em] text-muted-foreground">Quantity</label>
-              <input
+               <label htmlFor="calculator-quantity" className="mt-4 block text-xs font-extrabold uppercase tracking-[0.12em] text-muted-foreground">Quantity {variant ? `(${variant.unit})` : ''}</label>
+               <div className="mt-2 flex items-center gap-2"><button type="button" onClick={() => setQuantity(String(roundQuantity(Math.max(0, parsedQuantity - step))))} disabled={!validQuantity || parsedQuantity <= step} className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-primary/30 bg-card text-primary disabled:opacity-40" aria-label={`Decrease quantity by ${step} ${variant?.unit ?? 'units'}`} data-testid="button-quantity-minus"><Minus size={18} /></button>
+               <input
                 ref={quantityRef}
                 id="calculator-quantity"
                 type="number"
-                inputMode="numeric"
-                min="1"
+                 inputMode="decimal"
+                 min="0"
                  max={availableQuantity}
-                step="1"
+                 step="any"
                 value={quantity}
                 onChange={(event) => { setQuantity(event.target.value); setAddError(false); }}
-                className="mt-2 h-12 w-full rounded-xl border-2 border-primary/30 bg-card px-4 text-xl font-extrabold tabular-nums text-primary outline-none focus:border-primary sm:max-w-64"
+                 className="h-11 min-w-0 flex-1 rounded-xl border-2 border-primary/30 bg-card px-3 text-lg font-extrabold tabular-nums text-primary outline-none focus:border-primary sm:max-w-52"
                 aria-label={`Quantity of ${selectedProduct.name}`}
                 data-testid="input-product-quantity"
-              />
+               /><button type="button" onClick={() => setQuantity(String(roundQuantity((validQuantity ? parsedQuantity : 0) + step)))} disabled={availableQuantity !== undefined && parsedQuantity + step > availableQuantity} className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-primary/30 bg-card text-primary disabled:opacity-40" aria-label={`Increase quantity by ${step} ${variant?.unit ?? 'units'}`} data-testid="button-quantity-plus"><Plus size={18} /></button></div>
+               <p className="mt-1 text-[11px] text-muted-foreground">± {step} {variant?.unit ?? 'units'} per tap. You can enter any decimal amount.</p>
                {(addError || !validStockQuantity) && <p role="alert" className="mt-2 text-xs font-bold text-destructive" data-testid="status-add-error">{!validStockQuantity ? `Only ${availableQuantity} left in stock.` : 'Could not add this quantity. Please check it and try again.'}</p>}
                <button type="submit" disabled={!variant || !variantAvailable(selectedProduct, variant) || !validQuantity || !validStockQuantity} className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 text-sm font-extrabold text-primary-foreground shadow-[var(--shadow-md)] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-add-to-bill">
-                Add to bill{variant && validQuantity ? ` · ${money(variant.price * parsedQuantity)}` : ''} <ArrowRight size={18} />
+                 Add to bill{variant && validQuantity ? ` · ${money(roundMoney(variant.price * parsedQuantity))}` : ''} <ArrowRight size={18} />
               </button>
             </form>
           ) : <div className="rounded-xl border border-dashed border-border bg-card p-8 text-center text-sm font-semibold text-muted-foreground">No sizes or rates available for this product.</div>}
@@ -279,11 +285,9 @@ export default function BillingCalculator({
                   <p className="mt-0.5 text-xs font-medium text-muted-foreground">{line.variant} · {money(line.price)} each</p>
                 </div>
                 <div className="flex h-10 shrink-0 items-center rounded-lg border border-border bg-background">
-                  <button type="button" onClick={() => onAdjust(line.lineId, -1)} className="flex size-10 items-center justify-center rounded-l-lg hover:bg-muted" aria-label={`Decrease ${line.name} quantity by one`} data-testid={`button-decrease-${line.lineId}`}><Minus size={16} /></button>
-                  <span className="min-w-7 text-center text-sm font-extrabold tabular-nums" data-testid={`text-line-quantity-${line.lineId}`}>{line.qty}</span>
-                  <button type="button" onClick={() => onAdjust(line.lineId, 1)} className="flex size-10 items-center justify-center rounded-r-lg hover:bg-muted" aria-label={`Increase ${line.name} quantity by one`} data-testid={`button-increase-${line.lineId}`}><Plus size={16} /></button>
+                   {(() => { const increment = quantityStep(line.unit ?? ''); return <><button type="button" onClick={() => onAdjust(line.lineId, -increment)} disabled={line.qty <= increment} className="flex size-10 items-center justify-center rounded-l-lg hover:bg-muted disabled:opacity-40" aria-label={`Decrease ${line.name} quantity by ${increment} ${line.unit ?? 'units'}`} data-testid={`button-decrease-${line.lineId}`}><Minus size={16} /></button><span className="min-w-7 text-center text-sm font-extrabold tabular-nums" data-testid={`text-line-quantity-${line.lineId}`}>{roundQuantity(line.qty)}</span><button type="button" onClick={() => onAdjust(line.lineId, increment)} className="flex size-10 items-center justify-center rounded-r-lg hover:bg-muted" aria-label={`Increase ${line.name} quantity by ${increment} ${line.unit ?? 'units'}`} data-testid={`button-increase-${line.lineId}`}><Plus size={16} /></button></>; })()}
                 </div>
-                <span className="min-w-20 text-right text-sm font-extrabold tabular-nums text-primary" data-testid={`text-line-total-${line.lineId}`}>{money(line.price * line.qty)}</span>
+                 <span className="min-w-20 text-right text-sm font-extrabold tabular-nums text-primary" data-testid={`text-line-total-${line.lineId}`}>{money(roundMoney(line.price * line.qty))}</span>
                 <button type="button" onClick={() => onAdjust(line.lineId, -line.qty)} className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={`Remove ${line.name} from bill`} data-testid={`button-remove-${line.lineId}`}><Trash2 size={16} /></button>
               </div>)}
             </div>

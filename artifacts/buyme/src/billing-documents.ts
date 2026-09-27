@@ -14,6 +14,7 @@ type BillDocument = {
   lines: Line[];
   subtotal?: number;
   gst?: number;
+  discount?: number;
   total: number;
   paid: number;
   paymentMethod: string;
@@ -109,7 +110,7 @@ export async function createBillPdf(bill: BillDocument, profile: ShopProfile, ki
   pdf.line(left, y, right, y);
   y += 7;
   const subtotal = bill.subtotal ?? bill.lines.reduce((sum, line) => sum + line.price * line.qty, 0);
-  const gst = bill.gst ?? Math.max(0, bill.total - subtotal);
+  const gst = bill.gst ?? Math.max(0, bill.total + (bill.discount ?? 0) - subtotal);
   pdf.setFontSize(9);
   pdf.text('Subtotal', left, y);
   pdf.text(amountText(subtotal), right, y, { align: 'right' });
@@ -117,6 +118,11 @@ export async function createBillPdf(bill: BillDocument, profile: ShopProfile, ki
   if (gst > 0) {
     pdf.text(`GST (${profile.gstRate}%)`, left, y);
     pdf.text(amountText(gst), right, y, { align: 'right' });
+    y += 6;
+  }
+  if (bill.discount) {
+    pdf.text('Discount', left, y);
+    pdf.text(`- ${amountText(bill.discount)}`, right, y, { align: 'right' });
     y += 6;
   }
   pdf.setFont('helvetica', 'bold');
