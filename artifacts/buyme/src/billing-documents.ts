@@ -12,6 +12,8 @@ type BillDocument = {
   id: string;
   createdAt: string;
   lines: Line[];
+  customerName?: string;
+  customer?: string;
   subtotal?: number;
   gst?: number;
   discount?: number;
@@ -86,6 +88,22 @@ export async function createBillPdf(bill: BillDocument, profile: ShopProfile, ki
   pdf.setFontSize(8);
   pdf.text(`${kind === 'bill' ? 'Draft' : bill.id}  |  ${new Date(bill.createdAt).toLocaleString('en-IN')}`, left, y);
   y += 10;
+
+  if (bill.customerName?.trim() || bill.customer?.trim()) {
+    const nameLines = pdf.splitTextToSize(`Customer: ${bill.customerName?.trim() || 'Walk-in'}`, 120) as string[];
+    const phoneLines = bill.customer?.trim() ? pdf.splitTextToSize(`Phone: ${bill.customer.trim()}`, 120) as string[] : [];
+    pageBreak((nameLines.length + phoneLines.length) * 5 + 5);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(9);
+    pdf.text(nameLines, left, y);
+    y += nameLines.length * 5;
+    if (phoneLines.length) {
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(phoneLines, left, y);
+      y += phoneLines.length * 5;
+    }
+    y += 4;
+  }
 
   pdf.setFont('helvetica', 'bold');
   pdf.text('ITEM', left, y);

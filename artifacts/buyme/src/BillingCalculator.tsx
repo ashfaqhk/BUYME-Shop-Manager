@@ -61,11 +61,15 @@ export default function BillingCalculator({
   const [confirmClear, setConfirmClear] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [quickAdd, setQuickAdd] = useState(() => window.localStorage.getItem('buyme-quick-add') !== 'false');
   const searchRef = useRef<HTMLInputElement>(null);
   const quantityRef = useRef<HTMLInputElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const catalogScrollRef = useRef({ x: 0, y: 0 });
+  const pressTimer = useRef<number | null>(null);
+  const pressStart = useRef<{ x: number; y: number } | null>(null);
+  const ignoreClick = useRef<string | null>(null);
   const selectedProduct = products.find((product) => product.id === selectedId);
   const variant = selectedProduct?.variants.find((item) => item.id === variantId);
   const itemCount = bill.length;
@@ -79,6 +83,48 @@ export default function BillingCalculator({
   const stockBadge = (product: Product, item: Variant | undefined) => item && remainingStock(product, item) !== undefined && remainingStock(product, item)! <= (item.threshold ?? 5);
   const availableQuantity = selectedProduct && variant ? remainingStock(selectedProduct, variant) : undefined;
   const validStockQuantity = availableQuantity === undefined || parsedQuantity <= availableQuantity;
+
+  useEffect(() => () => {
+    if (pressTimer.current) window.clearTimeout(pressTimer.current);
+  }, []);
+
+  function setQuickAddMode(enabled: boolean) {
+    setQuickAdd(enabled);
+    window.localStorage.setItem('buyme-quick-add', String(enabled));
+  }
+
+  function cancelLongPress() {
+    if (pressTimer.current) window.clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+    pressStart.current = null;
+  }
+
+  function canQuickAdd(product: Product) {
+    return quickAdd && product.variants.length === 1 && quantityStep(product.variants[0].unit) === 1;
+  }
+
+  function beginLongPress(event: React.PointerEvent<HTMLButtonElement>, product: Product) {
+    if (!canQuickAdd(product) || event.button !== 0) return;
+    cancelLongPress();
+    ignoreClick.current = null;
+    const button = event.currentTarget;
+    pressStart.current = { x: event.clientX, y: event.clientY };
+    pressTimer.current = window.setTimeout(() => {
+      ignoreClick.current = product.id;
+      window.setTimeout(() => { if (ignoreClick.current === product.id) ignoreClick.current = null; }, 800);
+      pressTimer.current = null;
+      openProduct(product, button);
+    }, 550);
+  }
+
+  function selectFromGrid(product: Product, button: HTMLButtonElement) {
+    if (ignoreClick.current === product.id) { ignoreClick.current = null; return; }
+    if (canQuickAdd(product)) {
+      onAdd(product, product.variants[0], 1);
+      return;
+    }
+    openProduct(product, button);
+  }
 
   function closeProduct() {
     setSelectedId(null);
@@ -154,12 +200,21 @@ export default function BillingCalculator({
 
   return (
     <section className="min-h-[60dvh] pb-40 font-sans text-foreground lg:pb-28" aria-label="Billing calculator">
-      {view !== 'review' && <div className="sticky top-0 z-20 mb-4 flex items-end justify-between gap-4 rounded-xl border border-primary/15 bg-primary px-4 py-3 text-primary-foreground shadow-[var(--shadow-sm)] sm:mb-6 sm:px-6 sm:py-4" aria-label="Current bill total" data-testid="panel-calculator-total">
+      {view !== 'review' && <div className="sticky top-[max(1.25rem,env(safe-area-inset-top))] z-20 mb-4 flex items-end justify-between gap-4 rounded-xl border border-primary/15 bg-primary px-4 py-3 text-primary-foreground shadow-[var(--shadow-sm)] sm:top-4 sm:mb-6 sm:px-6 sm:py-4" aria-label="Current bill total" data-testid="panel-calculator-total">
         <div className="min-w-0"><p className="text-[9px] font-extrabold uppercase tracking-[.16em] opacity-75">Current bill · {roundQuantity(itemCount)} {itemCount === 1 ? 'item' : 'items'}</p><strong className="mt-1 block text-3xl font-extrabold leading-none tracking-tight tabular-nums sm:text-4xl" data-testid="text-running-total" aria-live="polite">{money(total)}</strong></div>
         <span className="hidden shrink-0 pb-1 text-right text-[11px] font-semibold opacity-70 sm:block">Add items below<br />Review before payment</span>
       </div>}
       {view === 'products' && (
         <>
+          <fieldset className="mb-4 rounded-xl border border-border bg-card px-3 py-2.5" data-testid="quick-add-mode">
+            <legend className="sr-only">Product tap behavior</legend>
+            <div className="flex items-center gap-2 text-xs font-bold text-primary">
+              <span className="shrink-0">Tap mode</span>
+              <label className={`flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1.5 ${quickAdd ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}><input type="radio" name="tap-mode" checked={quickAdd} onChange={() => setQuickAddMode(true)} className="accent-primary" data-testid="radio-quick-add" /> Quick add</label>
+              <label className={`flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1.5 ${!quickAdd ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}><input type="radio" name="tap-mode" checked={!quickAdd} onChange={() => setQuickAddMode(false)} className="accent-primary" data-testid="radio-choose-quantity" /> Enter quantity</label>
+            </div>
+            <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{quickAdd ? 'Tap once for 1, twice for 2. Long-press to edit. Products with sizes or weight always open first.' : 'Tap a product to choose its size and quantity.'}</p>
+          </fieldset>
           {search && !searchOpen && <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-primary/20 bg-card px-4 py-2.5 text-xs font-bold text-primary" data-testid="status-active-search"><span className="min-w-0 truncate">Results for “{search}”</span><button type="button" onClick={() => onSearch('')} aria-label="Clear product search" className="flex shrink-0 items-center gap-1" data-testid="button-clear-search"><X size={15} /> Clear</button></div>}
           {products.length ? (
             <div className="grid grid-cols-4 gap-x-2 gap-y-5 sm:grid-cols-5 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8" data-testid="grid-products">
@@ -171,14 +226,23 @@ export default function BillingCalculator({
                   <button
                     key={product.id}
                     type="button"
-                     onClick={(event) => openProduct(product, event.currentTarget)}
+                     onClick={(event) => selectFromGrid(product, event.currentTarget)}
+                     onPointerDown={(event) => beginLongPress(event, product)}
+                     onPointerMove={(event) => {
+                       if (pressStart.current && (Math.abs(event.clientX - pressStart.current.x) > 10 || Math.abs(event.clientY - pressStart.current.y) > 10)) cancelLongPress();
+                     }}
+                     onPointerUp={cancelLongPress}
+                     onPointerCancel={cancelLongPress}
+                     onPointerLeave={cancelLongPress}
+                     onContextMenu={(event) => { if (canQuickAdd(product)) { event.preventDefault(); cancelLongPress(); ignoreClick.current = product.id; openProduct(product, event.currentTarget); } }}
                      disabled={soldOut || !first}
-                     className="group min-w-0 text-left outline-none disabled:cursor-not-allowed"
-                     aria-label={`${soldOut ? 'Out of stock, ' : 'Select '}${product.name}${first ? `, from ${money(first.price)} per ${first.unit}` : ''}`}
+                     className="group min-w-0 touch-manipulation text-left outline-none disabled:cursor-not-allowed"
+                     aria-label={`${soldOut ? 'Out of stock, ' : canQuickAdd(product) ? 'Quick add ' : 'Select '}${product.name}${first ? `, from ${money(first.price)} per ${first.unit}` : ''}${canQuickAdd(product) ? '. Long press to enter quantity.' : ''}`}
                     data-testid={`button-product-${product.id}`}
                   >
-                     <span className={`relative block aspect-square overflow-hidden rounded-xl border border-border/80 bg-secondary shadow-[var(--shadow-sm)] transition-[border-color,transform] duration-200 group-enabled:hover:-translate-y-0.5 group-enabled:hover:border-primary/60 group-focus-visible:border-primary ${soldOut ? 'opacity-45 grayscale' : ''}`}>
+                      <span className={`relative block aspect-square overflow-hidden rounded-xl border border-border/80 bg-secondary shadow-[var(--shadow-sm)] transition-[border-color,transform] duration-200 group-enabled:hover:-translate-y-0.5 group-enabled:hover:border-primary/60 group-focus-visible:border-primary ${soldOut ? 'opacity-45 grayscale' : ''}`}>
                        <ProductPhoto product={product} className="h-full w-full transition-transform duration-200 group-enabled:hover:scale-[1.04]" />
+                        {canQuickAdd(product) && bill.some((line) => line.productId === product.id && line.variantId === first?.id) && <span className="absolute right-1 top-1 rounded-md bg-primary px-1.5 py-0.5 text-[10px] font-extrabold text-primary-foreground" data-testid={`badge-product-quantity-${product.id}`}>×{roundQuantity(bill.filter((line) => line.productId === product.id && line.variantId === first?.id).reduce((sum, line) => sum + line.qty, 0))}</span>}
                     </span>
                     <span className="sr-only">{product.name}</span>
                      <span className="mt-1.5 block text-center text-[10px] font-bold leading-4 text-primary sm:text-xs" data-testid={`text-rate-${product.id}`}>

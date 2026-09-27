@@ -68,6 +68,7 @@ type Sale = {
   paid: number;
   paymentMethod: PaymentMethod;
   paymentQr?: PaymentQR;
+  customerName?: string;
   customer?: string;
 };
 
@@ -279,9 +280,9 @@ function App() {
     return null;
   };
 
-  const completePayment = (method: PaymentMethod, paid: number, discount: number, customer?: string, paymentQr?: PaymentQR) => {
+  const completePayment = (method: PaymentMethod, paid: number, discount: number, customerName?: string, customer?: string, paymentQr?: PaymentQR) => {
     const total = roundMoney(billTotal - discount);
-    const sale: Sale = { id: `BM-${Date.now().toString().slice(-6)}`, createdAt: new Date().toISOString(), lines: bill, subtotal: billSubtotal, gst: billGst, discount, total, paid, paymentMethod: method, paymentQr: method === 'UPI' ? paymentQr : undefined, customer };
+    const sale: Sale = { id: `BM-${Date.now().toString().slice(-6)}`, createdAt: new Date().toISOString(), lines: bill, subtotal: billSubtotal, gst: billGst, discount, total, paid, paymentMethod: method, paymentQr: method === 'UPI' ? paymentQr : undefined, customerName, customer };
     setSales((current) => [sale, ...current]);
     setCatalog((current) => current.map((product) => ({ ...product, variants: product.variants.map((variant) => {
       const sold = bill.filter((line) => line.productId === product.id && line.variantId === variant.id).reduce((sum, line) => sum + line.qty, 0);
@@ -362,7 +363,7 @@ function App() {
             </div>
           </nav>}
           {activeSection === 'Catalog' && <CatalogView catalog={catalog} onAdd={() => setProductModal({ open: true })} onScan={() => setScanOpen(true)} onEdit={(product) => setProductModal({ open: true, product })} />}
-          {activeSection === 'Insights' && <InsightsView sales={sales} catalog={catalog} />}
+           {activeSection === 'Insights' && <InsightsView sales={sales} catalog={catalog} onOpenBill={setReceiptSale} />}
           {activeSection === 'Notifications' && <NotificationsView lowStock={lowStock} sales={sales} onGoCatalog={() => changeSection('Catalog')} />}
           {activeSection === 'Broadcast' && <BroadcastView settings={settings} onOpen={() => setBroadcastOpen(true)} />}
           {activeSection === 'Settings' && <SettingsView settings={settings} onSave={(next) => { setSettings(next); flash('Shop settings saved'); }} />}
@@ -518,9 +519,31 @@ function CatalogView({ catalog, onAdd, onScan, onEdit }: {
   </div>;
 }
 
-function InsightsView({ sales, catalog }: { sales: Sale[]; catalog: Product[] }) {
+function localDateInput(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function collectedAmount(sale: Sale) {
+  const amount = Number(sale.paid);
+  return Number.isFinite(amount) && amount > 0 ? roundMoney(amount) : 0;
+}
+
+function InsightsView({ sales, catalog, onOpenBill }: { sales: Sale[]; catalog: Product[]; onOpenBill: (sale: Sale) => void }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const [billDates, setBillDates] = useState(() => {
+    const start = new Date();
+    start.setDate(start.getDate() - 6);
+    return { from: localDateInput(start), to: localDateInput(new Date()) };
+  });
+  const validBillDates = !!billDates.from && !!billDates.to && billDates.from <= billDates.to;
+  const billStart = new Date(`${billDates.from}T00:00:00`).getTime();
+  const billEnd = new Date(`${billDates.to}T00:00:00`);
+  billEnd.setDate(billEnd.getDate() + 1);
+  const selectedBills = validBillDates ? sales.filter((sale) => {
+    const time = new Date(sale.createdAt).getTime();
+    return time >= billStart && time < billEnd.getTime();
+  }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) : [];
   const days = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(today);
     date.setDate(today.getDate() - (6 - index));
@@ -535,22 +558,22 @@ function InsightsView({ sales, catalog }: { sales: Sale[]; catalog: Product[] })
     const date = new Date(sale.createdAt).getTime();
     return date >= start && date < tomorrow.getTime();
   });
-  const revenue = currentSales.reduce((sum, sale) => sum + sale.paid, 0);
+  const revenue = roundMoney(currentSales.reduce((sum, sale) => sum + collectedAmount(sale), 0));
   const previousRevenue = sales.filter((sale) => {
     const date = new Date(sale.createdAt).getTime();
     return date >= previousStart.getTime() && date < start;
-  }).reduce((sum, sale) => sum + sale.paid, 0);
+  }).reduce((sum, sale) => sum + collectedAmount(sale), 0);
   const dailyRevenue = days.map((date) => {
     const next = new Date(date);
     next.setDate(date.getDate() + 1);
     return currentSales.filter((sale) => {
       const time = new Date(sale.createdAt).getTime();
       return time >= date.getTime() && time < next.getTime();
-    }).reduce((sum, sale) => sum + sale.paid, 0);
+    }).reduce((sum, sale) => sum + collectedAmount(sale), 0);
   });
   const maxDailyRevenue = Math.max(...dailyRevenue);
-  const cash = currentSales.filter((sale) => sale.paymentMethod === 'Cash').reduce((sum, sale) => sum + sale.paid, 0);
-  const upi = currentSales.filter((sale) => sale.paymentMethod === 'UPI').reduce((sum, sale) => sum + sale.paid, 0);
+  const cash = currentSales.filter((sale) => sale.paymentMethod === 'Cash').reduce((sum, sale) => sum + collectedAmount(sale), 0);
+  const upi = currentSales.filter((sale) => sale.paymentMethod === 'UPI').reduce((sum, sale) => sum + collectedAmount(sale), 0);
   const collected = cash + upi;
   const upiPercent = collected > 0 ? upi / collected * 100 : 0;
   const productTotals = Object.values(currentSales.flatMap((sale) => sale.lines).reduce<Record<string, { name: string; qty: number }>>((acc, line) => {
@@ -571,7 +594,7 @@ function InsightsView({ sales, catalog }: { sales: Sale[]; catalog: Product[] })
     {currentSales.length === 0 && <div className="mb-5 rounded-2xl border border-border bg-card p-6 text-center shadow-[var(--shadow-sm)]" data-testid="insights-empty"><ReceiptIndianRupee className="mx-auto text-primary" size={30} /><h3 className="mt-3 text-lg font-extrabold">No sales in the last 7 days</h3><p className="mt-1 text-sm text-muted-foreground">Saved bills will appear here once you record a payment.</p></div>}
     <div className="grid gap-4 lg:grid-cols-[1.25fr_.75fr]">
       <section className="rounded-2xl border border-border/80 bg-primary p-5 text-primary-foreground shadow-[0_16px_36px_hsl(var(--primary)/.14)] sm:p-6">
-        <div className="flex items-start justify-between"><div><p className="text-xs font-bold text-primary-foreground/60">Collected revenue · last 7 days</p><p className="mt-2 text-4xl font-extrabold tracking-tight">{money(revenue)}</p><p className="mt-2 text-xs font-bold text-sidebar-primary">{previousRevenue > 0 ? `${((revenue - previousRevenue) / previousRevenue * 100).toFixed(1)}% compared to previous 7 days` : 'No previous-period revenue to compare'}</p></div><span className="rounded-xl bg-primary-foreground/10 p-3 text-sidebar-primary"><BarChart3 size={20} /></span></div>
+        <div className="flex items-start justify-between"><div><p className="text-xs font-bold text-primary-foreground/60">Collected revenue · last 7 days</p><p className="mt-2 text-4xl font-extrabold tracking-tight" data-testid="text-seven-day-collected">{money(revenue)}</p><p className="mt-2 text-xs font-bold text-sidebar-primary">{previousRevenue > 0 ? `${((revenue - previousRevenue) / previousRevenue * 100).toFixed(1)}% compared to previous 7 days` : 'No previous-period revenue to compare'}</p></div><span className="rounded-xl bg-primary-foreground/10 p-3 text-sidebar-primary"><BarChart3 size={20} /></span></div>
         <div className="mt-8 flex h-28 items-end gap-2 sm:gap-4">{days.map((date, index) => <div key={date.toISOString()} className="flex flex-1 flex-col items-center gap-2" title={`${date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}: ${money(dailyRevenue[index])}`}><div className="flex h-24 w-full items-end"><div className={`w-full rounded-t-md ${dailyRevenue[index] === maxDailyRevenue && maxDailyRevenue > 0 ? 'bg-sidebar-primary' : 'bg-primary-foreground/20'}`} style={{ height: maxDailyRevenue > 0 ? `${dailyRevenue[index] / maxDailyRevenue * 100}%` : '0%' }} /></div><span className="text-[9px] font-mono-app text-primary-foreground/45">{date.toLocaleDateString('en-IN', { weekday: 'short' })}</span></div>)}</div>
       </section>
       <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6">
@@ -583,6 +606,21 @@ function InsightsView({ sales, catalog }: { sales: Sale[]; catalog: Product[] })
       <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6"><div className="flex items-center justify-between"><div><p className="text-xs font-bold text-muted-foreground">Top sellers</p><h3 className="mt-1 text-lg font-extrabold">Customers came for these</h3></div><span className="rounded-lg bg-chart-3/12 px-2 py-1 text-[10px] font-bold text-chart-3">Last 7 days</span></div><div className="mt-5 space-y-4">{productTotals.length ? productTotals.slice(0, 4).map(({ name, qty }, index) => <div key={`${name}-${index}`} className="flex items-center gap-3"><span className="font-mono-app text-[10px] text-muted-foreground">0{index + 1}</span><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/8 text-[10px] font-extrabold text-primary">{initials(name)}</span><span className="flex-1 text-xs font-bold">{name}</span><span className="text-xs font-extrabold">{qty} sold</span><div className="hidden h-1.5 w-20 overflow-hidden rounded-full bg-muted sm:block"><div className="h-full rounded-full bg-primary" style={{ width: `${qty / productTotals[0].qty * 100}%` }} /></div></div>) : <p className="text-xs text-muted-foreground">No products sold in this period.</p>}</div></section>
       <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6"><div className="flex items-center justify-between gap-2"><div><p className="text-xs font-bold text-muted-foreground">Inventory snapshot</p><h3 className="mt-1 text-lg font-extrabold">Worth keeping an eye on</h3></div><span className="rounded-lg bg-chart-4/20 px-2 py-1 text-[10px] font-bold">{trackedStock.length ? `${money(stockValue)} value` : 'Stock not tracked'}</span></div><div className="mt-5 space-y-3">{alerts.map(({ product, variant }) => <div key={`${product.id}-${variant.id}`} className="flex items-center gap-3 rounded-xl bg-accent/7 p-3"><AlertTriangle size={16} className="text-accent" /><div className="flex-1"><p className="text-xs font-bold">{product.name}</p><p className="mt-0.5 text-[10px] text-muted-foreground">{variant.name} · threshold {variant.threshold ?? 0}</p></div><span className="font-mono-app text-xs font-bold text-accent">{variant.stock} left</span></div>)}{trackedStock.length > 0 && alerts.length === 0 && <div className="rounded-xl bg-chart-3/10 p-4 text-xs font-bold text-chart-3">No urgent stock alerts. Nice work.</div>}{trackedStock.length === 0 && <p className="text-xs text-muted-foreground">Add stock quantities to your catalog to see inventory value and alerts.</p>}</div></section>
     </div>
+    <section className="mt-5 rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6" data-testid="section-recent-bills">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div><p className="text-xs font-bold text-muted-foreground">Saved bills</p><h3 className="mt-1 text-lg font-extrabold">Recent bills by date</h3><p className="mt-1 text-xs text-muted-foreground">Tap a bill to view its receipt and PDF.</p></div>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="text-[11px] font-bold text-muted-foreground">From<input type="date" value={billDates.from} onChange={(event) => setBillDates((current) => ({ ...current, from: event.target.value }))} className="field mt-1 block w-36 text-xs" data-testid="input-bills-from" /></label>
+          <label className="text-[11px] font-bold text-muted-foreground">To<input type="date" value={billDates.to} onChange={(event) => setBillDates((current) => ({ ...current, to: event.target.value }))} className="field mt-1 block w-36 text-xs" data-testid="input-bills-to" /></label>
+        </div>
+      </div>
+      {!validBillDates ? <p role="alert" className="mt-4 text-xs font-bold text-destructive">The start date must be on or before the end date.</p> : selectedBills.length ? <div className="mt-4 max-h-96 divide-y divide-border overflow-y-auto border-t border-border" data-testid="list-recent-bills">
+        {selectedBills.map((sale) => <button key={sale.id} type="button" onClick={() => onOpenBill(sale)} className="flex w-full items-start justify-between gap-3 py-3 text-left hover:text-primary" data-testid={`button-recent-bill-${sale.id}`}>
+          <span className="min-w-0"><span className="block truncate text-xs font-extrabold">{sale.customerName?.trim() || sale.customer?.trim() || 'Walk-in customer'}</span><span className="mt-0.5 block text-[11px] text-muted-foreground">{sale.id} · {dateLabel(sale.createdAt)}</span><span className="mt-1 block truncate text-xs text-muted-foreground">{sale.customerName && sale.customer ? `${sale.customer} · ` : ''}{sale.lines.map((line) => line.name).join(', ') || 'Bill'} · {sale.paymentMethod}</span></span>
+          <span className="shrink-0 text-right"><span className="block text-sm font-extrabold">{money(sale.total)}</span><span className="text-[11px] text-muted-foreground">{money(collectedAmount(sale))} collected</span></span>
+        </button>)}
+      </div> : <p className="mt-4 rounded-xl bg-muted/50 p-4 text-xs text-muted-foreground" data-testid="status-no-bills-in-range">No saved bills for these dates.</p>}
+    </section>
   </div>;
 }
 
@@ -761,10 +799,19 @@ function usePdfDownload(bill: Sale, settings: ShopSettings, kind: 'bill' | 'rece
   return { url: enabled && prepared?.bill === bill && prepared.settings === settings && prepared.kind === kind ? prepared.url : '', failed };
 }
 
+function CustomerFields({ name, number, onNameChange, onNumberChange }: {
+  name: string; number: string; onNameChange: (value: string) => void; onNumberChange: (value: string) => void;
+}) {
+  return <div className="grid gap-3 sm:grid-cols-2">
+    <Field label="Customer name (optional)"><input type="text" value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="Name for this bill" maxLength={80} className="field" data-testid="input-customer-name" /></Field>
+    <Field label="Customer phone (optional)"><input type="tel" inputMode="tel" value={number} onChange={(event) => onNumberChange(event.target.value)} placeholder="Phone number" maxLength={20} className="field" data-testid="input-payment-customer" /></Field>
+  </div>;
+}
+
 function PaymentModal({ total, subtotal, gst, lines, settings, onSaveQR, onClose, onComplete }: {
   total: number; subtotal: number; gst: number; lines: BillLine[]; settings: ShopSettings;
   onSaveQR: (profile: PaymentQR) => void; onClose: () => void;
-  onComplete: (method: PaymentMethod, paid: number, discount: number, customer?: string, paymentQr?: PaymentQR) => void;
+  onComplete: (method: PaymentMethod, paid: number, discount: number, customerName?: string, customer?: string, paymentQr?: PaymentQR) => void;
 }) {
   const [approved, setApproved] = useState(false);
   const [discountType, setDiscountType] = useState<'amount' | 'percent'>('amount');
@@ -775,7 +822,10 @@ function PaymentModal({ total, subtotal, gst, lines, settings, onSaveQR, onClose
   const finalTotal = roundMoney(total - discount);
   const [method, setMethod] = useState<PaymentMethod>('UPI');
   const [paid, setPaid] = useState(String(total));
+  const [customerName, setCustomerName] = useState('');
   const [customer, setCustomer] = useState('');
+  const customerNameValue = customerName.trim();
+  const customerNumberValue = customer.trim();
   const [selectedId, setSelectedId] = useState(settings.paymentQrs[0]?.id ?? '');
   const [generated, setGenerated] = useState<{ uri: string; image: string } | null>(null);
   const [qrError, setQrError] = useState(false);
@@ -825,7 +875,7 @@ function PaymentModal({ total, subtotal, gst, lines, settings, onSaveQR, onClose
     finally { setUploading(false); }
   };
   const [draftDate] = useState(() => new Date().toISOString());
-  const draft = useMemo<Sale>(() => ({ id: 'DRAFT', createdAt: draftDate, lines, subtotal, gst, discount, total: finalTotal, paid: paidValue, paymentMethod: method, paymentQr: chosen }), [draftDate, lines, subtotal, gst, discount, finalTotal, paidValue, method, chosen]);
+  const draft = useMemo<Sale>(() => ({ id: 'DRAFT', createdAt: draftDate, lines, subtotal, gst, discount, total: finalTotal, paid: paidValue, paymentMethod: method, paymentQr: chosen, customerName: customerNameValue || undefined, customer: customerNumberValue || undefined }), [draftDate, lines, subtotal, gst, discount, finalTotal, paidValue, method, chosen, customerNameValue, customerNumberValue]);
   const pdf = usePdfDownload(draft, paymentProfile, 'bill', approved && validPaid);
 
   return <Modal title={approved ? 'Approved bill & payment QR' : 'Seller review & discount'} onClose={onClose} large>
@@ -839,15 +889,17 @@ function PaymentModal({ total, subtotal, gst, lines, settings, onSaveQR, onClose
       </div>
       {!validDiscount && <p role="alert" className="text-xs font-bold text-destructive">Enter a discount between 0 and {discountType === 'percent' ? '100%' : money(total)}.</p>}
       <div className="text-sm text-muted-foreground">Subtotal {money(subtotal)}{gst > 0 && ` · GST ${money(gst)}`} · Discount {money(discount)}</div>
+      <div className="rounded-xl border border-border bg-card p-4"><p className="mb-3 text-sm font-extrabold">Who is this bill for?</p><CustomerFields name={customerName} number={customer} onNameChange={setCustomerName} onNumberChange={setCustomer} /><p className="mt-2 text-[11px] text-muted-foreground">Leave blank for a walk-in customer. You can update these details before saving.</p></div>
       <div className="flex justify-end gap-2 border-t border-border pt-4"><button onClick={onClose} className="rounded-xl px-4 py-3 text-sm font-bold">Back to bill</button><button onClick={() => { setPaid(String(finalTotal)); if (finalTotal === 0) setMethod('Cash'); setApproved(true); }} disabled={!validDiscount || !lines.length} className="rounded-xl bg-primary px-5 py-3 text-sm font-extrabold text-primary-foreground disabled:opacity-40" data-testid="button-approve-bill"><Check size={17} className="mr-2 inline" /> Approve final bill</button></div>
     </div> : <>
     <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_330px]" data-testid="stage-approved-payment">
       <div>
         <div className="rounded-xl bg-muted/55 p-5"><p className="text-xs font-bold text-muted-foreground">Seller-approved bill</p><div className="mt-2 flex items-end justify-between"><span className="text-base font-bold">Total to collect</span><span className="text-4xl font-extrabold text-primary" data-testid="text-payment-total">{money(finalTotal)}</span></div><p className="mt-2 text-xs text-muted-foreground">Subtotal {money(subtotal)}{gst > 0 && ` · GST ${money(gst)}`}{discount > 0 && ` · Discount −${money(discount)}`}</p></div>
         <div className="mt-3 max-h-56 space-y-2 overflow-auto rounded-xl border border-border p-4">{lines.map((line) => <div key={line.lineId} className="flex justify-between gap-2 text-sm"><span>{line.name} · {line.variant} × {line.qty} {line.unit}</span><strong>{money(roundMoney(line.price * line.qty))}</strong></div>)}</div>
+        <div className="mt-4 rounded-xl border border-border bg-card p-4"><p className="mb-3 text-xs font-extrabold">Customer on this bill · edit before saving</p><CustomerFields name={customerName} number={customer} onNameChange={setCustomerName} onNumberChange={setCustomer} /></div>
         <p className="mb-2 mt-5 text-xs font-bold">Payment method</p>
         <div className="grid grid-cols-2 gap-2"><button onClick={() => setMethod('UPI')} className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-sm font-extrabold ${method === 'UPI' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`} data-testid="button-payment-upi"><Smartphone size={17} /> UPI / QR</button><button onClick={() => setMethod('Cash')} className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-sm font-extrabold ${method === 'Cash' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`} data-testid="button-payment-cash"><Banknote size={17} /> Cash</button></div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2"><Field label="Amount received"><div className="relative"><IndianRupee size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input type="number" min="0" max={finalTotal} step="0.01" value={paid} onChange={(event) => setPaid(event.target.value)} className="field pl-8" data-testid="input-payment-amount" /></div></Field><Field label="Customer number (optional)"><input value={customer} onChange={(event) => setCustomer(event.target.value)} placeholder="91..." className="field" data-testid="input-payment-customer" /></Field></div>
+        <div className="mt-4 max-w-xs"><Field label="Amount received"><div className="relative"><IndianRupee size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input type="number" min="0" max={finalTotal} step="0.01" value={paid} onChange={(event) => setPaid(event.target.value)} className="field pl-8" data-testid="input-payment-amount" /></div></Field></div>
         {!validPaid && <p role="alert" className="mt-2 text-xs font-bold text-destructive">Enter an amount from ₹{finalTotal === 0 ? '0' : '0.01'} to {money(finalTotal)} with at most two decimal places.</p>}
         {paidValue < finalTotal && <p className="mt-2 text-xs font-bold text-accent">{money(roundMoney(finalTotal - paidValue))} will remain due after saving.</p>}
         {method === 'UPI' && <>
@@ -867,7 +919,7 @@ function PaymentModal({ total, subtotal, gst, lines, settings, onSaveQR, onClose
     <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-border pt-4">
       <button onClick={onClose} className="rounded-xl px-4 py-2.5 text-xs font-bold text-muted-foreground" data-testid="button-cancel-payment">Back</button>
        {pdf.url ? <><a href={pdf.url} download="bill-draft.pdf" className="flex items-center gap-2 rounded-xl border border-primary px-4 py-2.5 text-xs font-extrabold text-primary" data-testid="button-download-bill-pdf"><Download size={15} /> Download bill PDF</a><a href={pdf.url} target="_blank" rel="noopener noreferrer" className="flex items-center rounded-xl px-3 py-2.5 text-xs font-bold text-primary" data-testid="link-open-bill-pdf">Open PDF</a></> : <span className={`flex items-center rounded-xl border border-border px-4 py-2.5 text-xs font-bold ${pdf.failed ? 'text-destructive' : 'text-muted-foreground'}`}>{!validPaid ? 'Enter a valid amount for the PDF' : pdf.failed ? 'Could not prepare PDF' : 'Preparing PDF...'}</span>}
-       <button onClick={() => onComplete(method, paidValue, discount, customer || undefined, chosen)} disabled={!validPaid || !pdf.url || (method === 'UPI' && (!qrData || qrError))} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40" data-testid="button-confirm-payment"><Check size={15} /> {finalTotal === 0 ? 'Save bill' : 'Save payment'}</button>
+        <button onClick={() => onComplete(method, paidValue, discount, customerNameValue || undefined, customerNumberValue || undefined, chosen)} disabled={!validPaid || !pdf.url || (method === 'UPI' && (!qrData || qrError))} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40" data-testid="button-confirm-payment"><Check size={15} /> {finalTotal === 0 ? 'Save bill' : 'Save payment'}</button>
     </div>
     </>}
   </Modal>;
@@ -881,6 +933,7 @@ function ReceiptModal({ sale, settings, onClose }: { sale: Sale; settings: ShopS
   return <Modal title="Bill saved" onClose={onClose}>
     <div className="receipt-paper print-receipt rounded-xl border border-border p-5">
       <div className="text-center"><div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-lg font-extrabold text-primary-foreground">B</div><h3 className="mt-3 text-lg font-extrabold">{settings.shopName}</h3><p className="text-[10px] text-slate-500">{settings.phone}</p><p className="mt-3 border-y border-dashed border-slate-300 py-2 font-mono text-[10px] text-slate-500">{sale.id} · {dateLabel(sale.createdAt)}</p></div>
+      {(sale.customerName || sale.customer) && <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700" data-testid="receipt-customer"><p className="font-bold">Customer: {sale.customerName || 'Walk-in'}</p>{sale.customer && <p className="mt-0.5">Phone: {sale.customer}</p>}</div>}
       <div className="mt-4 space-y-2">{sale.lines.map((line) => <div key={line.lineId} className="flex justify-between gap-3 text-xs"><span>{line.name} ({line.variant}) <small className="text-slate-500">× {line.qty}</small></span><span className="font-mono">{money(line.price * line.qty)}</span></div>)}</div>
       <div className="mt-4 space-y-1 border-t border-slate-300 pt-3"><div className="flex justify-between text-xs"><span>Subtotal</span><span>{money(subtotal)}</span></div>{gst > 0 && <div className="flex justify-between text-xs"><span>GST</span><span>{money(gst)}</span></div>}{!!sale.discount && <div className="flex justify-between text-xs"><span>Discount</span><span>−{money(sale.discount)}</span></div>}<div className="flex justify-between text-sm font-extrabold"><span>Total</span><span>{money(sale.total)}</span></div><div className="flex justify-between text-[10px] text-slate-500"><span>{sale.paymentMethod} received</span><span>{money(sale.paid)}</span></div>{sale.paid < sale.total && <div className="flex justify-between text-[10px] font-bold text-slate-600"><span>Balance due</span><span>{money(roundMoney(sale.total - sale.paid))}</span></div>}</div>
     </div>
