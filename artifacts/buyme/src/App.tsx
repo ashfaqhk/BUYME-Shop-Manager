@@ -180,6 +180,7 @@ function App() {
   const changeSection = (section: Section) => { setActiveSection(section); setMobileNav(false); };
   const changeVersion = (version: AppVersion) => {
     setAppVersion(version);
+    setReceiptSale(null);
     if (version === 'basic' && activeSection !== 'Billing' && activeSection !== 'Catalog') changeSection('Billing');
   };
 
@@ -195,7 +196,7 @@ function App() {
       if (existing) return current.map((line) => line.lineId === existing.lineId ? { ...line, qty: roundQuantity(line.qty + quantity) } : line);
       return [...current, { lineId: `${product.id}-${variant.id}`, productId: product.id, variantId: variant.id, name: product.name, variant: variant.name, unit: variant.unit, qty: roundQuantity(quantity), price: variant.price }];
     });
-    flash(`${quantity} × ${product.name} added to bill`);
+    flash(`${quantity} × ${product.name} added to ${appVersion === 'basic' ? 'selection' : 'bill'}`);
     return true;
   };
 
@@ -299,8 +300,9 @@ function App() {
     setBill([]);
     setSearch('');
     setPaymentOpen(false);
-    setReceiptSale(sale);
-    flash('Payment recorded. Bill is ready.');
+    if (appVersion === 'full') setReceiptSale(sale);
+    else setReceiptSale(null);
+    flash(appVersion === 'basic' ? `Payment of ${money(paid)} recorded` : 'Payment recorded. Bill is ready.');
   };
 
   return (
@@ -376,7 +378,7 @@ function App() {
              </nav>
              <label className="text-xs font-bold text-muted-foreground">Version <select value={appVersion} onChange={(event) => changeVersion(event.target.value as AppVersion)} className="ml-1 rounded-lg border border-border bg-card px-2 py-2 text-primary" data-testid="select-app-version"><option value="basic">Basic</option><option value="full">Full</option></select></label>
            </div>}
-          {activeSection === 'Billing' && <BillingCalculator key={sales.length} products={filteredProducts} search={search} onSearch={setSearch} bill={bill} subtotal={billSubtotal} gst={billGst} total={billTotal} onAdd={addToBill} onImport={importToBill} onAdjust={adjustBill} onClear={() => { setBill([]); flash('Current bill cleared'); }} onPay={() => setPaymentOpen(true)} />}
+           {activeSection === 'Billing' && <BillingCalculator key={sales.length} basic={appVersion === 'basic'} products={filteredProducts} search={search} onSearch={setSearch} bill={bill} subtotal={billSubtotal} gst={billGst} total={billTotal} onAdd={addToBill} onImport={importToBill} onAdjust={adjustBill} onClear={() => { setBill([]); flash('Current bill cleared'); }} onPay={() => setPaymentOpen(true)} />}
            {appVersion === 'full' && activeSection === 'Billing' && <nav className="mt-20 border-t border-border pt-8" aria-label="More shop sections" data-testid="nav-billing-footer">
             <p className="mb-4 text-xs font-bold uppercase tracking-widest text-muted-foreground">More from your shop</p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -402,9 +404,11 @@ function App() {
       </div>}
 
       {scanOpen && <CatalogScanDialog catalog={catalog} onClose={() => setScanOpen(false)} onRestock={restockFromScan} onCreateDraft={(draft) => { setScanOpen(false); setProductModal({ open: true, draft }); }} onEditDraft={(productId, draft) => { const product = catalog.find((entry) => entry.id === productId); if (!product) return; setScanOpen(false); setProductModal({ open: true, product, draft: { ...draft, id: product.id } }); }} />}
-      {productModal.open && <ProductModal product={productModal.product} draft={productModal.draft} onClose={() => setProductModal({ open: false })} onSave={saveProduct} onDelete={deleteProduct} />}
-       {paymentOpen && <PaymentModal basic={appVersion === 'basic'} total={billTotal} subtotal={billSubtotal} gst={billGst} lines={bill} settings={settings} onSaveQR={(profile) => setSettings((current) => ({ ...current, paymentQrs: [...current.paymentQrs, profile] }))} onClose={() => setPaymentOpen(false)} onComplete={completePayment} />}
-       {receiptSale && <ReceiptModal sale={receiptSale} settings={settings} basic={appVersion === 'basic'} onClose={() => setReceiptSale(null)} />}
+       {productModal.open && <ProductModal basic={appVersion === 'basic'} product={productModal.product} draft={productModal.draft} onClose={() => setProductModal({ open: false })} onSave={saveProduct} onDelete={deleteProduct} />}
+       {paymentOpen && (appVersion === 'basic'
+         ? <BasicPaymentModal total={billTotal} onClose={() => setPaymentOpen(false)} onComplete={(method) => completePayment(method, billTotal, 0)} />
+         : <PaymentModal basic={false} total={billTotal} subtotal={billSubtotal} gst={billGst} lines={bill} settings={settings} onSaveQR={(profile) => setSettings((current) => ({ ...current, paymentQrs: [...current.paymentQrs, profile] }))} onClose={() => setPaymentOpen(false)} onComplete={completePayment} />)}
+       {appVersion === 'full' && receiptSale && <ReceiptModal sale={receiptSale} settings={settings} basic={false} onClose={() => setReceiptSale(null)} />}
       {broadcastOpen && <BroadcastModal settings={settings} onClose={() => setBroadcastOpen(false)} onDone={(message) => { setBroadcastOpen(false); flash(message); }} />}
       {toast && <div className="fixed bottom-20 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-2 rounded-xl bg-sidebar px-4 py-3 text-xs font-bold text-sidebar-foreground shadow-[0_12px_35px_rgba(36,31,61,.22)] lg:bottom-7" data-testid="status-toast"><CircleCheck size={16} className="text-sidebar-primary" />{toast}</div>}
     </div>
@@ -524,19 +528,21 @@ function CatalogView({ catalog, basic, onAdd, onScan, onEdit }: {
   const [query, setQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All items');
   const filtered = catalog.filter((product) => (selectedCategory === 'All items' || product.category === selectedCategory) && `${product.name} ${product.category}`.toLowerCase().includes(query.toLowerCase()));
+  const lowStockCount = catalog.reduce((count, product) => count + product.variants.filter((variant) => variant.stock !== undefined && variant.stock <= (variant.threshold ?? 5)).length, 0);
   return <div className="rise-in">
     <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-      <div><p className="text-sm font-semibold text-accent">The whole shelf, at a glance.</p><h2 className="font-display text-[2.45rem] leading-none text-primary sm:text-[3rem]">Your catalog.</h2><p className="mt-2 text-sm text-muted-foreground">{catalog.length} products · tap a card to edit</p></div>
+       <div><p className="text-sm font-semibold text-accent">The whole shelf, at a glance.</p><h2 className="font-display text-[2.45rem] leading-none text-primary sm:text-[3rem]">Your catalog.</h2><p className="mt-2 text-sm text-muted-foreground">{catalog.length} products · tap a card to edit{basic && ` · ${lowStockCount} low-stock ${lowStockCount === 1 ? 'type' : 'types'}`}</p></div>
       <div className="flex flex-wrap gap-2">{!basic && <button onClick={onScan} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-primary/30 bg-card px-4 text-sm font-extrabold text-primary hover:bg-secondary" data-testid="button-scan-product"><Sparkles size={17} /> Scan product / restock</button>}<button onClick={onAdd} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-extrabold text-primary-foreground hover:brightness-110" data-testid="button-add-product"><Plus size={18} /> Add product</button></div>
     </div>
     <label className="relative block max-w-xl"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-primary" size={19} /><span className="sr-only">Search catalog</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a product..." className="h-13 w-full rounded-2xl border-2 border-primary/25 bg-card pl-12 pr-4 text-sm font-semibold outline-none focus:border-primary" data-testid="input-search-catalog" /></label>
     <div className="no-scrollbar my-4 flex gap-2 overflow-x-auto pb-2">{categories.map((item) => <button key={item} onClick={() => setSelectedCategory(item)} className={`whitespace-nowrap rounded-full border px-4 py-2.5 text-xs font-bold ${selectedCategory === item ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground'}`}>{item}</button>)}</div>
     {filtered.length === 0 ? <EmptyState icon={Package} title="No products here" description="Try a different search or add a new product." action="Add product" onAction={onAdd} /> : <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
       {filtered.map((product) => {
+         const lowVariants = product.variants.filter((variant) => variant.stock !== undefined && variant.stock <= (variant.threshold ?? 5));
         return <article key={product.id} className="group overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)] transition-all hover:-translate-y-1 hover:shadow-[var(--shadow-md)]">
           <button onClick={() => onEdit(product)} className="block w-full text-left" aria-label={`Edit ${product.name}`} data-testid={`button-edit-product-${product.id}`}>
             <div className="relative overflow-hidden bg-muted/40"><ProductArtwork product={product} className="aspect-square w-full transition-transform duration-300 group-hover:scale-[1.03]" /></div>
-            <div className="p-3"><h3 className="truncate text-sm font-extrabold leading-5">{product.name}</h3><p className="mt-1 text-sm font-extrabold text-primary">{product.variants.length ? money(Math.min(...product.variants.map((variant) => variant.price))) : 'Set a rate'}</p></div>
+             <div className="p-3"><h3 className="truncate text-sm font-extrabold leading-5">{product.name}</h3><p className="mt-1 text-sm font-extrabold text-primary">{product.variants.length ? money(Math.min(...product.variants.map((variant) => variant.price))) : 'Set a rate'}</p>{basic && lowVariants.length > 0 && <p className="mt-2 text-[11px] font-bold text-amber-800" data-testid={`catalog-low-stock-${product.id}`}>{lowVariants.map((variant) => `${variant.name}: ${variant.stock} left`).join(' · ')}</p>}</div>
           </button>
         </article>;
       })}
@@ -680,7 +686,7 @@ function SettingsView({ settings, appVersion, onVersionChange, onSave }: { setti
     <div className="mb-7"><p className="text-sm font-semibold text-accent">Make it yours.</p><h2 className="font-display text-[2.35rem] leading-none text-primary">Settings.</h2></div>
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
       <section className="rounded-2xl border border-border bg-card p-5 sm:p-7">
-        <div className="border-b border-border pb-5"><h3 className="text-lg font-extrabold">App version</h3><p className="mt-1 text-xs text-muted-foreground">Basic shows only Billing and Catalog. Full keeps the other shop tools. Switching does not delete your bills or products.</p><select value={appVersion} onChange={(event) => onVersionChange(event.target.value as AppVersion)} className="field mt-3 max-w-xs" data-testid="select-app-version"><option value="full">Full</option><option value="basic">Basic</option></select></div>
+        <div className="border-b border-border pb-5"><h3 className="text-lg font-extrabold">App version</h3><p className="mt-1 text-xs text-muted-foreground">Basic has just Billing and Catalog: select items, show the amount due, and record payment without a bill or PDF. Full keeps all shop tools. Switching does not delete your products or recorded sales.</p><select value={appVersion} onChange={(event) => onVersionChange(event.target.value as AppVersion)} className="field mt-3 max-w-xs" data-testid="select-app-version"><option value="full">Full</option><option value="basic">Basic</option></select></div>
         <div className="border-b border-border pb-5"><h3 className="text-lg font-extrabold">Shop details</h3><p className="mt-1 text-xs text-muted-foreground">Shown on bills and receipts.</p><div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Shop name"><input value={form.shopName} onChange={(event) => setForm({ ...form, shopName: event.target.value })} className="field" data-testid="input-shop-name" /></Field><Field label="Phone number"><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} className="field" data-testid="input-shop-phone" /></Field></div></div>
         <div className="border-b border-border py-5"><PaymentQRManager profiles={form.paymentQrs} onChange={(paymentQrs) => setForm((current) => ({ ...current, paymentQrs }))} /></div>
         <div className="border-b border-border py-5">
@@ -775,7 +781,7 @@ async function compressProductPhoto(file: File): Promise<string> {
   return canvas.toDataURL('image/jpeg', 0.72);
 }
 
-function ProductModal({ product, draft, onClose, onSave, onDelete }: { product?: Product; draft?: Product; onClose: () => void; onSave: (product: Product) => void; onDelete: (id: string) => void }) {
+function ProductModal({ basic, product, draft, onClose, onSave, onDelete }: { basic: boolean; product?: Product; draft?: Product; onClose: () => void; onSave: (product: Product) => void; onDelete: (id: string) => void }) {
   const [form, setForm] = useState<Product>(draft ?? product ?? { id: crypto.randomUUID(), name: '', category: 'Grocery', updatedAt: 'Just now', variants: [{ id: crypto.randomUUID(), name: 'Standard', price: 0, stock: undefined, threshold: undefined, unit: 'piece' }] });
   const [photoBusy, setPhotoBusy] = useState(false);
   const updateVariant = (id: string, patch: Partial<Variant>) => setForm((current) => ({ ...current, variants: current.variants.map((variant) => variant.id === id ? { ...variant, ...patch } : variant) }));
@@ -793,7 +799,7 @@ function ProductModal({ product, draft, onClose, onSave, onDelete }: { product?:
   };
   const save = () => {
     if (!form.name.trim()) return window.alert('Enter a product name.');
-    if (!product && !form.image) return window.alert('Attach a product photo.');
+    if (!basic && !product && !form.image) return window.alert('Attach a product photo.');
     if (form.variants.some((variant) => !variant.name.trim() || !Number.isFinite(variant.price) || variant.price <= 0)) return window.alert('Enter a name and price for each option.');
     onSave({ ...form, name: form.name.trim(), updatedAt: 'Just now' });
   };
@@ -801,7 +807,7 @@ function ProductModal({ product, draft, onClose, onSave, onDelete }: { product?:
     <div className="space-y-4">
       <label className="block cursor-pointer overflow-hidden rounded-xl border-2 border-dashed border-primary/30 bg-background text-center">
         <div className="relative mx-auto h-36 w-full max-w-48"><ProductArtwork product={form} className="h-full w-full rounded-xl" /></div>
-        <span className="block py-2 text-xs font-bold text-primary">{photoBusy ? 'Preparing photo...' : form.image ? 'Change product photo' : 'Attach a product photo'}</span>
+         <span className="block py-2 text-xs font-bold text-primary">{photoBusy ? 'Preparing photo...' : form.image ? 'Change product photo' : basic ? 'Add product photo (optional)' : 'Attach a product photo'}</span>
         <input type="file" accept="image/*" onChange={(event) => uploadPhoto(event.target.files?.[0])} className="sr-only" data-testid="input-product-photo" />
       </label>
       <Field label="Product name"><input autoFocus value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Coconut Oil" className="field" data-testid="input-product-name" /></Field>
@@ -848,6 +854,28 @@ function CustomerFields({ name, number, onNameChange, onNumberChange }: {
     <Field label="Customer name (optional)"><input type="text" value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="Name for this bill" maxLength={80} className="field" data-testid="input-customer-name" /></Field>
     <Field label="Customer phone (optional)"><input type="tel" inputMode="tel" value={number} onChange={(event) => onNumberChange(event.target.value)} placeholder="Phone number" maxLength={20} className="field" data-testid="input-payment-customer" /></Field>
   </div>;
+}
+
+function BasicPaymentModal({ total, onClose, onComplete }: {
+  total: number; onClose: () => void; onComplete: (method: PaymentMethod) => void;
+}) {
+  const [method, setMethod] = useState<PaymentMethod>('UPI');
+  return <Modal title="Payment" onClose={onClose}>
+    <div className="rounded-xl bg-primary p-6 text-primary-foreground">
+      <p className="text-xs font-bold uppercase tracking-widest opacity-75">Tell the customer · amount due</p>
+      <p className="mt-2 text-5xl font-extrabold tabular-nums" data-testid="basic-amount-due">{money(total)}</p>
+    </div>
+    <p className="mb-3 mt-6 text-sm font-bold">How did the customer pay?</p>
+    <div className="grid grid-cols-2 gap-3">
+      <button type="button" onClick={() => setMethod('UPI')} aria-pressed={method === 'UPI'} className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-sm font-extrabold ${method === 'UPI' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`} data-testid="button-payment-upi"><Smartphone size={17} /> UPI</button>
+      <button type="button" onClick={() => setMethod('Cash')} aria-pressed={method === 'Cash'} className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-sm font-extrabold ${method === 'Cash' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`} data-testid="button-payment-cash"><Banknote size={17} /> Cash</button>
+    </div>
+    <p className="mt-4 text-xs leading-5 text-muted-foreground" data-testid="basic-payment-note">{method === 'UPI' ? 'Use the QR already displayed in your shop. Confirm payment in your UPI app before marking it received.' : 'Confirm you have received the cash before marking it received.'}</p>
+    <div className="mt-6 flex justify-end gap-2 border-t border-border pt-4">
+      <button type="button" onClick={onClose} className="rounded-xl px-4 py-3 text-sm font-bold text-muted-foreground">Back</button>
+      <button type="button" onClick={() => onComplete(method)} className="rounded-xl bg-primary px-5 py-3 text-sm font-extrabold text-primary-foreground" data-testid="button-confirm-payment">Mark {money(total)} received</button>
+    </div>
+  </Modal>;
 }
 
 function PaymentModal({ basic, total, subtotal, gst, lines, settings, onSaveQR, onClose, onComplete }: {

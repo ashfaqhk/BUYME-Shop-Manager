@@ -17,6 +17,7 @@ export type CalculatorBillLine = {
 };
 
 type BillingCalculatorProps = {
+  basic: boolean;
   products: Product[];
   search: string;
   onSearch: (value: string) => void;
@@ -51,7 +52,7 @@ function ProductPhoto({ product, className = '' }: { product: Product; className
 }
 
 export default function BillingCalculator({
-  products, search, onSearch, bill, subtotal, gst, total, onAdd, onAdjust, onClear, onPay, onImport,
+  basic, products, search, onSearch, bill, subtotal, gst, total, onAdd, onAdjust, onClear, onPay, onImport,
 }: BillingCalculatorProps) {
   const [view, setView] = useState<'products' | 'review'>('products');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -209,9 +210,9 @@ export default function BillingCalculator({
 
   return (
     <section className="min-h-[60dvh] pb-40 font-sans text-foreground lg:pb-28" aria-label="Billing calculator">
-      {view !== 'review' && <div className="sticky top-[max(1.25rem,env(safe-area-inset-top))] z-20 mb-4 flex items-end justify-between gap-4 rounded-xl border border-primary/15 bg-primary px-4 py-3 text-primary-foreground shadow-[var(--shadow-sm)] sm:top-4 sm:mb-6 sm:px-6 sm:py-4" aria-label="Current bill total" data-testid="panel-calculator-total">
-        <div className="min-w-0"><p className="text-[9px] font-extrabold uppercase tracking-[.16em] opacity-75">Current bill · {roundQuantity(itemCount)} {itemCount === 1 ? 'item' : 'items'}</p><strong className="mt-1 block text-3xl font-extrabold leading-none tracking-tight tabular-nums sm:text-4xl" data-testid="text-running-total" aria-live="polite">{money(total)}</strong></div>
-        <span className="hidden shrink-0 pb-1 text-right text-[11px] font-semibold opacity-70 sm:block">Add items below<br />Review before payment</span>
+      {view !== 'review' && <div className="sticky top-[max(1.25rem,env(safe-area-inset-top))] z-20 mb-4 flex items-end justify-between gap-4 rounded-xl border border-primary/15 bg-primary px-4 py-3 text-primary-foreground shadow-[var(--shadow-sm)] sm:top-4 sm:mb-6 sm:px-6 sm:py-4" aria-label={basic ? 'Amount due' : 'Current bill total'} data-testid="panel-calculator-total">
+        <div className="min-w-0"><p className="text-[9px] font-extrabold uppercase tracking-[.16em] opacity-75">{basic ? 'Amount due' : 'Current bill'} · {roundQuantity(itemCount)} {itemCount === 1 ? 'item' : 'items'}</p><strong className="mt-1 block text-3xl font-extrabold leading-none tracking-tight tabular-nums sm:text-4xl" data-testid="text-running-total" aria-live="polite">{money(total)}</strong></div>
+        <span className="hidden shrink-0 pb-1 text-right text-[11px] font-semibold opacity-70 sm:block">Add items below<br />{basic ? 'Select payment when ready' : 'Review before payment'}</span>
       </div>}
       {view === 'products' && (
         <>
@@ -277,7 +278,7 @@ export default function BillingCalculator({
 
       {view === 'products' && selectedProduct && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-primary/35 sm:items-center sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) closeProduct(); }} data-testid="overlay-product-backdrop">
-        <div ref={sheetRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Add ${selectedProduct.name} to bill`} className="max-h-[min(88dvh,720px)] w-full max-w-xl overflow-y-auto rounded-t-[1.75rem] border border-border bg-background p-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl outline-none sm:rounded-[1.75rem] sm:p-6" data-testid="view-variants">
+        <div ref={sheetRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Add ${selectedProduct.name} to ${basic ? 'selection' : 'bill'}`} className="max-h-[min(88dvh,720px)] w-full max-w-xl overflow-y-auto rounded-t-[1.75rem] border border-border bg-background p-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl outline-none sm:rounded-[1.75rem] sm:p-6" data-testid="view-variants">
           <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-primary/20 sm:hidden" aria-hidden="true" />
           <div className="mb-4 flex items-start gap-3 border-b border-border pb-4">
             <ProductPhoto product={selectedProduct} className="size-16 shrink-0 rounded-xl border border-border sm:size-20" />
@@ -309,7 +310,7 @@ export default function BillingCalculator({
                 ))}
               </div>
                {selectedBillLine && <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3" data-testid="current-product-in-bill">
-                 <div><p className="text-xs font-extrabold text-primary">Already in bill</p><p className="mt-0.5 text-xs text-muted-foreground">{selectedBillLine.variant} · {roundQuantity(selectedBillLine.qty)} {selectedBillLine.unit}</p></div>
+                  <div><p className="text-xs font-extrabold text-primary">Already {basic ? 'selected' : 'in bill'}</p><p className="mt-0.5 text-xs text-muted-foreground">{selectedBillLine.variant} · {roundQuantity(selectedBillLine.qty)} {selectedBillLine.unit}</p></div>
                  <div className="flex items-center rounded-xl border border-primary/25 bg-card">
                    <button type="button" onClick={() => onAdjust(selectedBillLine.lineId, -Math.min(step, selectedBillLine.qty))} className="flex size-11 items-center justify-center text-primary" aria-label={`Remove one ${selectedBillLine.unit ?? 'unit'} of ${selectedProduct.name} from bill`} data-testid="button-sheet-bill-minus"><Minus size={18} /></button>
                    <span className="min-w-7 text-center text-sm font-extrabold tabular-nums" data-testid="text-sheet-bill-quantity">{roundQuantity(selectedBillLine.qty)}</span>
@@ -335,7 +336,7 @@ export default function BillingCalculator({
                <p className="mt-1 text-[11px] text-muted-foreground">± {step} {variant?.unit ?? 'units'} per tap. You can enter any decimal amount.</p>
                {(addError || !validStockQuantity) && <p role="alert" className="mt-2 text-xs font-bold text-destructive" data-testid="status-add-error">{!validStockQuantity ? `Only ${availableQuantity} left in stock.` : 'Could not add this quantity. Please check it and try again.'}</p>}
                <button type="submit" disabled={!variant || !variantAvailable(selectedProduct, variant) || !validQuantity || !validStockQuantity} className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 text-sm font-extrabold text-primary-foreground shadow-[var(--shadow-md)] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-add-to-bill">
-                 Add to bill{variant && validQuantity ? ` · ${money(roundMoney(variant.price * parsedQuantity))}` : ''} <ArrowRight size={18} />
+                  Add to {basic ? 'selection' : 'bill'}{variant && validQuantity ? ` · ${money(roundMoney(variant.price * parsedQuantity))}` : ''} <ArrowRight size={18} />
               </button>
             </form>
           ) : <div className="rounded-xl border border-dashed border-border bg-card p-8 text-center text-sm font-semibold text-muted-foreground">No sizes or rates available for this product.</div>}
@@ -401,10 +402,10 @@ export default function BillingCalculator({
           />
           <button type="button" onClick={() => { onSearch(''); setSearchOpen(false); }} className="absolute right-2 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Close item search" data-testid="button-close-search"><X size={17} /></button>
         </label>}
-        <div className="mx-auto grid max-w-6xl grid-cols-[1fr_1.3fr_1fr] gap-2 sm:grid-cols-[1fr_1.4fr_1.2fr] sm:gap-3">
+        <div className={`mx-auto grid max-w-6xl gap-2 sm:gap-3 ${basic ? 'grid-cols-[1fr_1.4fr]' : 'grid-cols-[1fr_1.3fr_1fr] sm:grid-cols-[1fr_1.4fr_1.2fr]'}`}>
           <button type="button" onClick={openSearch} className="flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-xl border border-primary/25 bg-background px-2 text-xs font-extrabold text-primary hover:bg-secondary sm:text-sm" aria-label="Search items" data-testid="button-search-items"><Search size={17} className="shrink-0" /> <span className="sm:hidden">Search</span><span className="hidden sm:inline">Search items</span></button>
-          <button type="button" onClick={() => { onSearch(''); setImportOpen(true); }} className="flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-xl border border-primary/25 bg-background px-2 text-xs font-extrabold text-primary hover:bg-secondary sm:text-sm" aria-label="Add list or add items" data-testid="button-add-list"><FilePlus2 size={17} className="shrink-0" /> <span className="sm:hidden">Add list</span><span className="hidden sm:inline">Add list / Add items</span></button>
-          <button type="button" onClick={() => { setConfirmClear(false); setView('review'); }} disabled={!bill.length} className="flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-xl bg-primary px-2 text-xs font-extrabold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 sm:text-sm" aria-label={`Next, review bill with ${itemCount} items totalling ${money(total)}`} data-testid="button-review-bill">Next <ArrowRight size={17} className="shrink-0" /></button>
+          {!basic && <button type="button" onClick={() => { onSearch(''); setImportOpen(true); }} className="flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-xl border border-primary/25 bg-background px-2 text-xs font-extrabold text-primary hover:bg-secondary sm:text-sm" aria-label="Add list or add items" data-testid="button-add-list"><FilePlus2 size={17} className="shrink-0" /> <span className="sm:hidden">Add list</span><span className="hidden sm:inline">Add list / Add items</span></button>}
+          <button type="button" onClick={() => { if (basic) onPay(); else { setConfirmClear(false); setView('review'); } }} disabled={!bill.length} className="flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-xl bg-primary px-2 text-xs font-extrabold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 sm:text-sm" aria-label={basic ? `Payment due ${money(total)}` : `Next, review bill with ${itemCount} items totalling ${money(total)}`} data-testid="button-review-bill">{basic ? `Pay ${money(total)}` : 'Next'} <ArrowRight size={17} className="shrink-0" /></button>
         </div>
       </div>}
       {importOpen && <ListImportDialog products={products} onImport={onImport} onClose={() => setImportOpen(false)} />}
