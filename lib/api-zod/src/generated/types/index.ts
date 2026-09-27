@@ -6,7 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './billListDocument';
+export * from './billListItems';
 export * from './detectedBillingItem';
-export * from './extractBillingListBody';
-export * from './extractBillingListResponse';
 export * from './healthStatus';
+export * from './productPhotoDocument';
+export * from './productPhotoSuggestions';

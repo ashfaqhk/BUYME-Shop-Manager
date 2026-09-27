@@ -6,7 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface ExtractBillingListBody {
+export interface BillListDocument {
   /** Base64 data URL for a JPEG, PNG, WebP image, or PDF */
   document: string;
   /** @maxLength 150 */

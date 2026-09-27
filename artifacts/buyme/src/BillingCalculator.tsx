@@ -51,7 +51,7 @@ function ProductPhoto({ product, className = '' }: { product: Product; className
 export default function BillingCalculator({
   products, search, onSearch, bill, subtotal, gst, total, onAdd, onAdjust, onClear, onPay, onImport,
 }: BillingCalculatorProps) {
-  const [view, setView] = useState<'products' | 'variants' | 'review'>('products');
+  const [view, setView] = useState<'products' | 'review'>('products');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [variantId, setVariantId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState('1');
@@ -61,49 +61,88 @@ export default function BillingCalculator({
   const [importOpen, setImportOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const quantityRef = useRef<HTMLInputElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLButtonElement | null>(null);
+  const catalogScrollRef = useRef({ x: 0, y: 0 });
   const selectedProduct = products.find((product) => product.id === selectedId);
   const variant = selectedProduct?.variants.find((item) => item.id === variantId);
   const itemCount = bill.reduce((sum, line) => sum + line.qty, 0);
   const parsedQuantity = Number(quantity);
   const validQuantity = Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0 && quantity.trim() !== '';
 
+  const remainingStock = (product: Product, item: Variant) => item.stock === undefined ? undefined : Math.max(0, item.stock - bill.filter((line) => line.productId === product.id && line.variantId === item.id).reduce((sum, line) => sum + line.qty, 0));
+  const variantAvailable = (product: Product, item: Variant) => remainingStock(product, item) === undefined || remainingStock(product, item)! > 0;
+  const isSoldOut = (product: Product) => product.variants.length > 0 && product.variants.every((item) => remainingStock(product, item) === 0);
+  const stockBadge = (product: Product, item: Variant | undefined) => item && remainingStock(product, item) !== undefined && remainingStock(product, item)! <= (item.threshold ?? 5);
+  const availableQuantity = selectedProduct && variant ? remainingStock(selectedProduct, variant) : undefined;
+  const validStockQuantity = availableQuantity === undefined || parsedQuantity <= availableQuantity;
+
+  function closeProduct() {
+    setSelectedId(null);
+    setVariantId(null);
+    setAddError(false);
+    // Prevent focus restoration from scrolling the still-mounted catalog.
+    window.requestAnimationFrame(() => {
+      window.scrollTo(catalogScrollRef.current.x, catalogScrollRef.current.y);
+      openerRef.current?.focus({ preventScroll: true });
+    });
+  }
+
   useEffect(() => {
-    if (view === 'variants' && !selectedProduct) setView('products');
-  }, [view, selectedProduct]);
+    if (selectedId && !selectedProduct) closeProduct();
+  }, [selectedId, selectedProduct]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
-        if (view === 'variants') setView('products');
-        if (view === 'review') { setConfirmClear(false); setView('products'); }
+        if (selectedId) { event.preventDefault(); closeProduct(); }
+        else if (view === 'review') { setConfirmClear(false); setView('products'); }
+      }
+      if (event.key === 'Tab' && selectedId && sheetRef.current) {
+        const focusable = Array.from(sheetRef.current.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)'));
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === sheetRef.current)) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [view]);
+  }, [view, selectedId]);
 
-  function openProduct(product: Product) {
+  useEffect(() => {
+    if (selectedId) sheetRef.current?.focus({ preventScroll: true });
+  }, [selectedId]);
+
+  function openProduct(product: Product, button: HTMLButtonElement) {
+    if (isSoldOut(product) || !product.variants.some((item) => variantAvailable(product, item))) return;
+    openerRef.current = button;
+    catalogScrollRef.current = { x: window.scrollX, y: window.scrollY };
     setSelectedId(product.id);
-    setVariantId(product.variants[0]?.id ?? null);
+    setVariantId(product.variants.filter((item) => variantAvailable(product, item)).sort((a, b) => a.price - b.price)[0]?.id ?? null);
     setQuantity('1');
     setAddError(false);
-    setView('variants');
   }
 
   function addToBill(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedProduct || !variant || !validQuantity) return;
+    if (!selectedProduct || !variant || !variantAvailable(selectedProduct, variant) || !validQuantity || !validStockQuantity) return;
     if (onAdd(selectedProduct, variant, parsedQuantity)) {
-      setView('products');
-      setSelectedId(null);
+      closeProduct();
       setQuantity('1');
-      setAddError(false);
     } else {
       setAddError(true);
     }
   }
 
   function openSearch() {
+    if (selectedId) closeProduct();
     setView('products');
     setSearchOpen(true);
     window.setTimeout(() => searchRef.current?.focus(), 0);
@@ -121,23 +160,28 @@ export default function BillingCalculator({
           {products.length ? (
             <div className="grid grid-cols-4 gap-x-2 gap-y-5 sm:grid-cols-5 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8" data-testid="grid-products">
               {products.map((product) => {
-                const first = product.variants.length ? product.variants.reduce((lowest, current) => current.price < lowest.price ? current : lowest) : undefined;
+                 const soldOut = isSoldOut(product);
+                  const first = product.variants.filter((item) => variantAvailable(product, item)).sort((a, b) => a.price - b.price)[0]
+                   ?? product.variants.slice().sort((a, b) => a.price - b.price)[0];
                 return (
                   <button
                     key={product.id}
                     type="button"
-                    onClick={() => openProduct(product)}
-                    className="group min-w-0 text-left outline-none"
-                    aria-label={`Select ${product.name}${first ? `, from ${money(first.price)} per ${first.unit}` : ''}`}
+                     onClick={(event) => openProduct(product, event.currentTarget)}
+                     disabled={soldOut || !first}
+                     className="group min-w-0 text-left outline-none disabled:cursor-not-allowed"
+                     aria-label={`${soldOut ? 'Out of stock, ' : 'Select '}${product.name}${first ? `, from ${money(first.price)} per ${first.unit}` : ''}`}
                     data-testid={`button-product-${product.id}`}
                   >
-                    <span className="block aspect-square overflow-hidden rounded-xl border border-border/80 bg-secondary shadow-[var(--shadow-sm)] transition-[border-color,transform] duration-200 group-hover:-translate-y-0.5 group-hover:border-primary/60 group-focus-visible:border-primary">
-                      <ProductPhoto product={product} className="h-full w-full transition-transform duration-200 group-hover:scale-[1.04]" />
+                     <span className={`relative block aspect-square overflow-hidden rounded-xl border border-border/80 bg-secondary shadow-[var(--shadow-sm)] transition-[border-color,transform] duration-200 group-enabled:hover:-translate-y-0.5 group-enabled:hover:border-primary/60 group-focus-visible:border-primary ${soldOut ? 'opacity-45 grayscale' : ''}`}>
+                       <ProductPhoto product={product} className="h-full w-full transition-transform duration-200 group-enabled:hover:scale-[1.04]" />
                     </span>
                     <span className="sr-only">{product.name}</span>
-                    <span className="mt-1.5 block truncate text-center text-[10px] font-bold leading-4 text-primary sm:text-xs" data-testid={`text-rate-${product.id}`}>
+                     <span className="mt-1.5 block text-center text-[10px] font-bold leading-4 text-primary sm:text-xs" data-testid={`text-rate-${product.id}`}>
                       {first ? <>{money(first.price)}<span className="font-medium text-muted-foreground"> / {first.unit}</span></> : 'No rate'}
+                        {(soldOut || stockBadge(product, first)) && <span className="ml-1 inline-block whitespace-nowrap rounded-md bg-amber-100 px-1 py-0.5 align-middle text-[9px] font-extrabold leading-none text-amber-900">{soldOut ? '0 left' : `${first && remainingStock(product, first)} left`}</span>}
                     </span>
+                     {soldOut && <span className="mt-0.5 block text-center text-[9px] font-bold text-muted-foreground">Out of stock</span>}
                   </button>
                 );
               })}
@@ -152,55 +196,61 @@ export default function BillingCalculator({
         </>
       )}
 
-      {view === 'variants' && selectedProduct && (
-        <div className="mx-auto max-w-3xl" data-testid="view-variants">
-          <button type="button" onClick={() => setView('products')} className="mb-5 inline-flex items-center gap-2 rounded-lg py-2 text-sm font-bold text-primary hover:opacity-70" aria-label="Back to products" data-testid="button-back-products"><ArrowLeft size={18} /> Products</button>
-          <div className="mb-6 flex items-center gap-4 border-b border-border pb-5">
-            <ProductPhoto product={selectedProduct} className="size-20 shrink-0 rounded-xl border border-border sm:size-24" />
+      {view === 'products' && selectedProduct && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-primary/35 sm:items-center sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) closeProduct(); }} data-testid="overlay-product-backdrop">
+        <div ref={sheetRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Add ${selectedProduct.name} to bill`} className="max-h-[min(88dvh,720px)] w-full max-w-xl overflow-y-auto rounded-t-[1.75rem] border border-border bg-background p-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl outline-none sm:rounded-[1.75rem] sm:p-6" data-testid="view-variants">
+          <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-primary/20 sm:hidden" aria-hidden="true" />
+          <div className="mb-4 flex items-start gap-3 border-b border-border pb-4">
+            <ProductPhoto product={selectedProduct} className="size-16 shrink-0 rounded-xl border border-border sm:size-20" />
             <div className="min-w-0">
-              <h2 className="text-xl font-extrabold leading-tight tracking-tight sm:text-2xl" data-testid="text-selected-product">{selectedProduct.name}</h2>
-              <p className="mt-1 text-xs font-semibold text-muted-foreground">Choose a size or type</p>
+              <p className="text-[10px] font-extrabold uppercase tracking-[.16em] text-muted-foreground">Add to bill</p>
+              <h2 className="mt-1 text-lg font-extrabold leading-tight tracking-tight sm:text-xl" data-testid="text-selected-product">{selectedProduct.name}</h2>
+              <p className="mt-1 text-xs font-semibold text-muted-foreground">Choose a size or type and quantity</p>
             </div>
+            <button type="button" onClick={closeProduct} className="ml-auto flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-primary hover:bg-primary/15" aria-label="Close product" data-testid="button-back-products"><X size={18} /></button>
           </div>
           {selectedProduct.variants.length ? (
             <form onSubmit={addToBill}>
-              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3" role="radiogroup" aria-label={`${selectedProduct.name} size or type`}>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" aria-label={`${selectedProduct.name} size or type`}>
                 {selectedProduct.variants.map((option) => (
                   <button
                     key={option.id}
                     type="button"
                     role="radio"
                     aria-checked={variantId === option.id}
-                    onClick={() => { setVariantId(option.id); setAddError(false); quantityRef.current?.focus(); }}
-                    className={`overflow-hidden rounded-xl border-2 text-left transition-[border-color,background-color] ${variantId === option.id ? 'border-primary bg-primary/8' : 'border-border bg-card hover:border-primary/40'}`}
-                    aria-label={`${option.name}, ${money(option.price)} per ${option.unit}`}
+                     disabled={!variantAvailable(selectedProduct, option)}
+                    onClick={() => { setVariantId(option.id); setAddError(false); }}
+                    className={`overflow-hidden rounded-xl border-2 text-left transition-[border-color,background-color] disabled:cursor-not-allowed disabled:opacity-45 ${variantId === option.id ? 'border-primary bg-primary/8' : 'border-border bg-card hover:border-primary/40'}`}
+                     aria-label={`${option.name}, ${money(option.price)} per ${option.unit}${!variantAvailable(selectedProduct, option) ? ', out of stock' : ''}`}
                     data-testid={`button-variant-${option.id}`}
                   >
-                    <ProductPhoto product={{ ...selectedProduct, image: option.image || selectedProduct.image }} className="aspect-[1.5] w-full" />
-                    <span className="block p-3"><span className="flex items-start justify-between gap-1"><span className="text-sm font-extrabold leading-5">{option.name}</span>{variantId === option.id && <Check size={16} className="shrink-0 text-primary" aria-hidden="true" />}</span><span className="mt-2 block text-base font-extrabold text-primary">{money(option.price)} <span className="text-[11px] font-medium text-muted-foreground">/ {option.unit}</span></span></span>
+                    <ProductPhoto product={{ ...selectedProduct, image: option.image || selectedProduct.image }} className="aspect-[2.2] w-full" />
+                     <span className="block p-2.5"><span className="flex items-start justify-between gap-1"><span className="text-xs font-extrabold leading-4">{option.name}</span>{variantId === option.id && <Check size={15} className="shrink-0 text-primary" aria-hidden="true" />}</span><span className="mt-1 block text-sm font-extrabold text-primary">{money(option.price)} <span className="text-[10px] font-medium text-muted-foreground">/ {option.unit}</span></span><span className="mt-1 block text-[10px] font-bold text-muted-foreground">{option.stock === undefined ? 'Available' : remainingStock(selectedProduct, option) === 0 ? 'Out of stock' : `${remainingStock(selectedProduct, option)} left`}</span></span>
                   </button>
                 ))}
               </div>
-              <label htmlFor="calculator-quantity" className="mt-8 block text-xs font-extrabold uppercase tracking-[0.12em] text-muted-foreground">Quantity</label>
+              <label htmlFor="calculator-quantity" className="mt-4 block text-xs font-extrabold uppercase tracking-[0.12em] text-muted-foreground">Quantity</label>
               <input
                 ref={quantityRef}
                 id="calculator-quantity"
                 type="number"
                 inputMode="numeric"
                 min="1"
+                 max={availableQuantity}
                 step="1"
                 value={quantity}
                 onChange={(event) => { setQuantity(event.target.value); setAddError(false); }}
-                className="mt-2 h-18 w-full rounded-xl border-2 border-primary/30 bg-card px-5 text-3xl font-extrabold tabular-nums text-primary outline-none focus:border-primary sm:max-w-64"
+                className="mt-2 h-12 w-full rounded-xl border-2 border-primary/30 bg-card px-4 text-xl font-extrabold tabular-nums text-primary outline-none focus:border-primary sm:max-w-64"
                 aria-label={`Quantity of ${selectedProduct.name}`}
                 data-testid="input-product-quantity"
               />
-              {addError && <p role="alert" className="mt-3 text-sm font-bold text-destructive" data-testid="status-add-error">Could not add this quantity. Please check it and try again.</p>}
-              <button type="submit" disabled={!variant || !validQuantity} className="mt-5 flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 text-sm font-extrabold text-primary-foreground shadow-[var(--shadow-md)] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-w-64" data-testid="button-add-to-bill">
+               {(addError || !validStockQuantity) && <p role="alert" className="mt-2 text-xs font-bold text-destructive" data-testid="status-add-error">{!validStockQuantity ? `Only ${availableQuantity} left in stock.` : 'Could not add this quantity. Please check it and try again.'}</p>}
+               <button type="submit" disabled={!variant || !variantAvailable(selectedProduct, variant) || !validQuantity || !validStockQuantity} className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 text-sm font-extrabold text-primary-foreground shadow-[var(--shadow-md)] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-add-to-bill">
                 Add to bill{variant && validQuantity ? ` · ${money(variant.price * parsedQuantity)}` : ''} <ArrowRight size={18} />
               </button>
             </form>
           ) : <div className="rounded-xl border border-dashed border-border bg-card p-8 text-center text-sm font-semibold text-muted-foreground">No sizes or rates available for this product.</div>}
+        </div>
         </div>
       )}
 
@@ -247,7 +297,7 @@ export default function BillingCalculator({
         </div>
       )}
 
-      {view !== 'review' && <div className="fixed bottom-[70px] left-0 right-0 z-30 border-t border-primary/15 bg-card/95 px-3 py-2.5 shadow-[0_-8px_30px_rgba(54,48,81,.09)] backdrop-blur-md lg:bottom-0 lg:left-[264px] lg:px-8" aria-label="Billing actions" data-testid="bar-bill-total">
+      {view !== 'review' && <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-primary/15 bg-card/95 px-3 py-2.5 shadow-[0_-8px_30px_rgba(54,48,81,.09)] backdrop-blur-md lg:left-0 lg:px-8" aria-label="Billing actions" data-testid="bar-bill-total">
         {view === 'products' && searchOpen && <label className="relative mx-auto mb-2 block max-w-6xl">
           <Search size={19} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-primary/65" aria-hidden="true" />
           <span className="sr-only">Search items</span>

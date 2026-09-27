@@ -28,6 +28,7 @@ app.use(
 app.use(cors());
 // This one route accepts a single, short-lived document encoded as a data URL.
 app.use("/api/billing/extract-list", express.json({ limit: "9mb" }));
+app.use("/api/catalog/scan-product", express.json({ limit: "9mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

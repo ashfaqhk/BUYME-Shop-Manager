@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 import { categories, readCatalog, type Product, type Variant } from './catalog-data';
 import BillingCalculator from './BillingCalculator';
+import CatalogScanDialog from './CatalogScanDialog';
 import type { ImportBillLine } from './list-import-types';
 import { createBillPdf, getUpiUri } from './billing-documents';
 import { prepareQrImage, validatePaymentQR, type PaymentQR } from './payment-profiles';
@@ -140,7 +141,8 @@ function App() {
   const [bill, setBill] = useState<BillLine[]>([]);
   const [search, setSearch] = useState('');
   const [mobileNav, setMobileNav] = useState(false);
-  const [productModal, setProductModal] = useState<{ open: boolean; product?: Product }>({ open: false });
+  const [productModal, setProductModal] = useState<{ open: boolean; product?: Product; draft?: Product }>({ open: false });
+  const [scanOpen, setScanOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [receiptSale, setReceiptSale] = useState<Sale | null>(null);
   const [toast, setToast] = useState('');
@@ -258,6 +260,22 @@ function App() {
     flash('Product removed from catalog');
   };
 
+  const restockFromScan = (productId: string, variantId: string, quantity: number): string | null => {
+    if (!Number.isSafeInteger(quantity) || quantity < 1) return 'Enter a positive whole-number arrival quantity.';
+    const product = catalog.find((item) => item.id === productId);
+    const variant = product?.variants.find((item) => item.id === variantId);
+    if (!product || !variant) return 'Choose a product and size from your catalog.';
+    if (typeof variant.stock === 'number' && (!Number.isSafeInteger(variant.stock) || variant.stock < 0)) return 'Current stock is invalid. Correct it in the product editor first.';
+    if ((variant.stock ?? 0) + quantity > Number.MAX_SAFE_INTEGER) return 'That stock quantity is too large.';
+    setCatalog((current) => current.map((item) => item.id !== productId ? item : {
+      ...item,
+      updatedAt: 'Just now',
+      variants: item.variants.map((option) => option.id === variantId ? { ...option, stock: (option.stock ?? 0) + quantity } : option),
+    }));
+    flash(`${quantity} ${variant.unit} added to ${product.name} stock`);
+    return null;
+  };
+
   const completePayment = (method: PaymentMethod, paid: number, customer?: string, paymentQr?: PaymentQR) => {
     const sale: Sale = { id: `BM-${Date.now().toString().slice(-6)}`, createdAt: new Date().toISOString(), lines: bill, subtotal: billSubtotal, gst: billGst, total: billTotal, paid, paymentMethod: method, paymentQr: method === 'UPI' ? paymentQr : undefined, customer };
     setSales((current) => [sale, ...current]);
@@ -274,7 +292,7 @@ function App() {
 
   return (
     <div className="buyme-shell min-h-[100dvh] bg-background text-foreground">
-      <aside className={`fixed inset-y-0 left-0 z-40 flex w-[264px] flex-col bg-sidebar px-4 py-5 text-sidebar-foreground transition-transform duration-300 lg:translate-x-0 ${mobileNav ? 'translate-x-0' : '-translate-x-full'}`}>
+      {activeSection !== 'Billing' && <aside className={`fixed inset-y-0 left-0 z-40 flex w-[264px] flex-col bg-sidebar px-4 py-5 text-sidebar-foreground transition-transform duration-300 lg:translate-x-0 ${mobileNav ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex items-center justify-between px-3">
           <button className="flex items-center gap-3 text-left" onClick={() => changeSection('Billing')} data-testid="button-brand-home">
             <span className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-sidebar-primary text-lg font-extrabold text-sidebar-primary-foreground shadow-[0_7px_0_hsl(var(--sidebar-primary)/.25)]">B</span>
@@ -310,14 +328,14 @@ function App() {
             <span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold">{settings.shopName}</span><span className="block truncate text-[10px] text-sidebar-foreground/45">{settings.phone}</span></span>
           </div>
         </div>
-      </aside>
+      </aside>}
 
-      {mobileNav && <button aria-label="Close menu" className="fixed inset-0 z-30 bg-foreground/30 lg:hidden" onClick={() => setMobileNav(false)} data-testid="button-menu-backdrop" />}
-      <main className="min-h-[100dvh] lg:pl-[264px]">
-        <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-md sm:px-8 lg:px-10">
+      {activeSection !== 'Billing' && mobileNav && <button aria-label="Close menu" className="fixed inset-0 z-30 bg-foreground/30 lg:hidden" onClick={() => setMobileNav(false)} data-testid="button-menu-backdrop" />}
+      <main className={`min-h-[100dvh] ${activeSection !== 'Billing' ? 'lg:pl-[264px]' : ''}`}>
+        {activeSection !== 'Billing' && <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-md sm:px-8 lg:px-10">
           <div className="flex items-center gap-3">
             <button className="rounded-xl border border-border bg-card p-2.5 lg:hidden" onClick={() => setMobileNav(true)} data-testid="button-open-navigation"><Menu size={18} /></button>
-            <div><p className="text-[11px] font-bold uppercase tracking-[.17em] text-muted-foreground">{activeSection === 'Billing' ? new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()) : 'Shop workspace'}</p><h1 className="mt-0.5 text-lg font-extrabold tracking-tight">{activeSection === 'Billing' ? 'Calculate' : activeSection}</h1></div>
+             <div><p className="text-[11px] font-bold uppercase tracking-[.17em] text-muted-foreground">Shop workspace</p><h1 className="mt-0.5 text-lg font-extrabold tracking-tight">{activeSection}</h1></div>
           </div>
           <div className="flex items-center gap-2 sm:gap-4">
             <button onClick={() => changeSection('Notifications')} className="relative rounded-xl border border-border bg-card p-2.5 text-muted-foreground hover:border-primary/40 hover:text-primary" data-testid="button-notifications"><Bell size={18} />{lowStock.length > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-bold text-accent-foreground">{lowStock.length}</span>}</button>
@@ -325,11 +343,21 @@ function App() {
             <div className="hidden items-center gap-2.5 sm:flex"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-extrabold text-primary">{initials(settings.shopName)}</span><span className="text-xs font-bold">{settings.shopName.split(' ')[0]}</span></div>
             <button onClick={() => changeSection('Settings')} className="rounded-xl p-2 text-muted-foreground hover:bg-muted hover:text-foreground sm:hidden" data-testid="button-mobile-settings"><Settings2 size={18} /></button>
           </div>
-        </header>
+        </header>}
 
-        <div className="mx-auto max-w-[1480px] px-5 pb-24 pt-7 sm:px-8 lg:px-10 lg:pb-10">
+        <div className={`mx-auto max-w-[1480px] px-5 sm:px-8 lg:px-10 ${activeSection === 'Billing' ? 'pb-14 pt-5 sm:pt-7' : 'pb-24 pt-7 lg:pb-10'}`}>
           {activeSection === 'Billing' && <BillingCalculator key={sales.length} products={filteredProducts} search={search} onSearch={setSearch} bill={bill} subtotal={billSubtotal} gst={billGst} total={billTotal} onAdd={addToBill} onImport={importToBill} onAdjust={adjustBill} onClear={() => { setBill([]); flash('Current bill cleared'); }} onPay={() => setPaymentOpen(true)} />}
-          {activeSection === 'Catalog' && <CatalogView catalog={catalog} onAdd={() => setProductModal({ open: true })} onEdit={(product) => setProductModal({ open: true, product })} />}
+          {activeSection === 'Billing' && <nav className="mt-20 border-t border-border pt-8" aria-label="More shop sections" data-testid="nav-billing-footer">
+            <p className="mb-4 text-xs font-bold uppercase tracking-widest text-muted-foreground">More from your shop</p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {navItems.filter((item) => item.label !== 'Billing').map((item) => {
+                const Icon = item.icon;
+                return <button key={item.label} type="button" onClick={() => { changeSection(item.label); window.scrollTo({ top: 0, behavior: 'instant' }); }} className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-left text-sm font-bold text-primary hover:border-primary/40" data-testid={`footer-nav-${item.label.toLowerCase()}`}><Icon size={17} />{item.label}</button>;
+              })}
+              <button type="button" onClick={() => { changeSection('Settings'); window.scrollTo({ top: 0, behavior: 'instant' }); }} className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-left text-sm font-bold text-primary hover:border-primary/40" data-testid="footer-nav-settings"><Settings2 size={17} />Settings</button>
+            </div>
+          </nav>}
+          {activeSection === 'Catalog' && <CatalogView catalog={catalog} onAdd={() => setProductModal({ open: true })} onScan={() => setScanOpen(true)} onEdit={(product) => setProductModal({ open: true, product })} />}
           {activeSection === 'Insights' && <InsightsView sales={sales} catalog={catalog} />}
           {activeSection === 'Notifications' && <NotificationsView lowStock={lowStock} sales={sales} onGoCatalog={() => changeSection('Catalog')} />}
           {activeSection === 'Broadcast' && <BroadcastView settings={settings} onOpen={() => setBroadcastOpen(true)} />}
@@ -337,13 +365,14 @@ function App() {
         </div>
       </main>
 
-      <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-border bg-card/95 px-2 py-2 backdrop-blur lg:hidden">
+      {activeSection !== 'Billing' && <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-border bg-card/95 px-2 py-2 backdrop-blur lg:hidden">
         <div className="mx-auto flex max-w-lg justify-around">
           {navItems.slice(0, 4).map((item) => { const Icon = item.icon; return <button key={item.label} onClick={() => changeSection(item.label)} className={`flex min-w-[64px] flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[10px] font-bold ${activeSection === item.label ? 'text-primary' : 'text-muted-foreground'}`} data-testid={`mobile-nav-${item.label.toLowerCase()}`}><Icon size={18} /><span>{item.label}</span></button>; })}
         </div>
-      </div>
+      </div>}
 
-      {productModal.open && <ProductModal product={productModal.product} onClose={() => setProductModal({ open: false })} onSave={saveProduct} onDelete={deleteProduct} />}
+      {scanOpen && <CatalogScanDialog catalog={catalog} onClose={() => setScanOpen(false)} onRestock={restockFromScan} onCreateDraft={(draft) => { setScanOpen(false); setProductModal({ open: true, draft }); }} onEditDraft={(productId, draft) => { const product = catalog.find((entry) => entry.id === productId); if (!product) return; setScanOpen(false); setProductModal({ open: true, product, draft: { ...draft, id: product.id } }); }} />}
+      {productModal.open && <ProductModal product={productModal.product} draft={productModal.draft} onClose={() => setProductModal({ open: false })} onSave={saveProduct} onDelete={deleteProduct} />}
       {paymentOpen && <PaymentModal total={billTotal} subtotal={billSubtotal} gst={billGst} lines={bill} settings={settings} onSaveQR={(profile) => setSettings((current) => ({ ...current, paymentQrs: [...current.paymentQrs, profile] }))} onClose={() => setPaymentOpen(false)} onComplete={completePayment} />}
       {receiptSale && <ReceiptModal sale={receiptSale} settings={settings} onClose={() => setReceiptSale(null)} />}
       {broadcastOpen && <BroadcastModal settings={settings} onClose={() => setBroadcastOpen(false)} onDone={(message) => { setBroadcastOpen(false); flash(message); }} />}
@@ -459,8 +488,8 @@ function BillPanel({ bill, subtotal, gst, total, onAdjust, onClear, onPay }: {
   </section>;
 }
 
-function CatalogView({ catalog, onAdd, onEdit }: {
-  catalog: Product[]; onAdd: () => void; onEdit: (product: Product) => void;
+function CatalogView({ catalog, onAdd, onScan, onEdit }: {
+  catalog: Product[]; onAdd: () => void; onScan: () => void; onEdit: (product: Product) => void;
 }) {
   const [query, setQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All items');
@@ -468,7 +497,7 @@ function CatalogView({ catalog, onAdd, onEdit }: {
   return <div className="rise-in">
     <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div><p className="text-sm font-semibold text-accent">The whole shelf, at a glance.</p><h2 className="font-display text-[2.45rem] leading-none text-primary sm:text-[3rem]">Your catalog.</h2><p className="mt-2 text-sm text-muted-foreground">{catalog.length} products · tap a card to edit</p></div>
-      <button onClick={onAdd} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-extrabold text-primary-foreground hover:brightness-110" data-testid="button-add-product"><Plus size={18} /> Add product</button>
+      <div className="flex flex-wrap gap-2"><button onClick={onScan} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-primary/30 bg-card px-4 text-sm font-extrabold text-primary hover:bg-secondary" data-testid="button-scan-product"><Sparkles size={17} /> Scan product / restock</button><button onClick={onAdd} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-extrabold text-primary-foreground hover:brightness-110" data-testid="button-add-product"><Plus size={18} /> Add product</button></div>
     </div>
     <label className="relative block max-w-xl"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-primary" size={19} /><span className="sr-only">Search catalog</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a product..." className="h-13 w-full rounded-2xl border-2 border-primary/25 bg-card pl-12 pr-4 text-sm font-semibold outline-none focus:border-primary" data-testid="input-search-catalog" /></label>
     <div className="no-scrollbar my-4 flex gap-2 overflow-x-auto pb-2">{categories.map((item) => <button key={item} onClick={() => setSelectedCategory(item)} className={`whitespace-nowrap rounded-full border px-4 py-2.5 text-xs font-bold ${selectedCategory === item ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground'}`}>{item}</button>)}</div>
@@ -644,8 +673,8 @@ async function compressProductPhoto(file: File): Promise<string> {
   return canvas.toDataURL('image/jpeg', 0.72);
 }
 
-function ProductModal({ product, onClose, onSave, onDelete }: { product?: Product; onClose: () => void; onSave: (product: Product) => void; onDelete: (id: string) => void }) {
-  const [form, setForm] = useState<Product>(product ?? { id: crypto.randomUUID(), name: '', category: 'Grocery', updatedAt: 'Just now', variants: [{ id: crypto.randomUUID(), name: 'Standard', price: 0, stock: undefined, threshold: undefined, unit: 'piece' }] });
+function ProductModal({ product, draft, onClose, onSave, onDelete }: { product?: Product; draft?: Product; onClose: () => void; onSave: (product: Product) => void; onDelete: (id: string) => void }) {
+  const [form, setForm] = useState<Product>(draft ?? product ?? { id: crypto.randomUUID(), name: '', category: 'Grocery', updatedAt: 'Just now', variants: [{ id: crypto.randomUUID(), name: 'Standard', price: 0, stock: undefined, threshold: undefined, unit: 'piece' }] });
   const [photoBusy, setPhotoBusy] = useState(false);
   const updateVariant = (id: string, patch: Partial<Variant>) => setForm((current) => ({ ...current, variants: current.variants.map((variant) => variant.id === id ? { ...variant, ...patch } : variant) }));
   const uploadPhoto = async (file?: File) => {

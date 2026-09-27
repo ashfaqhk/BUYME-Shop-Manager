@@ -9,7 +9,7 @@ export interface HealthStatus {
   status: string;
 }
 
-export interface ExtractBillingListBody {
+export interface BillListDocument {
   /** Base64 data URL for a JPEG, PNG, WebP image, or PDF */
   document: string;
   /** @maxLength 150 */
@@ -28,7 +28,29 @@ export interface DetectedBillingItem {
   unitPrice: number | null;
 }
 
-export interface ExtractBillingListResponse {
+export interface BillListItems {
   items: DetectedBillingItem[];
+}
+
+export interface ProductPhotoDocument {
+  /** Base64 JPEG, PNG or WebP image data URL */
+  document: string;
+  /** @maxLength 150 */
+  filename: string;
+}
+
+export interface ProductPhotoSuggestions {
+  /** @nullable */
+  name: string | null;
+  /** @nullable */
+  category: string | null;
+  /** @nullable */
+  variant: string | null;
+  /** @nullable */
+  unit: string | null;
+  /** @nullable */
+  unitPrice: number | null;
+  /** @nullable */
+  quantity: number | null;
 }
 

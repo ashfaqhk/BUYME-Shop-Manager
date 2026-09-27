@@ -7,6 +7,6 @@
  */
 import type { DetectedBillingItem } from './detectedBillingItem';
 
-export interface ExtractBillingListResponse {
+export interface BillListItems {
   items: DetectedBillingItem[];
 }

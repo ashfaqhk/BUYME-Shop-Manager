@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: billing
     description: Bill item extraction
+  - name: catalog
+    description: Product photo recognition
 paths:
   /healthz:
     get:
@@ -37,14 +39,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ExtractBillingListBody"
+              $ref: "#/components/schemas/BillListDocument"
       responses:
         "200":
           description: Detected items, which may require correction before billing
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ExtractBillingListResponse"
+                $ref: "#/components/schemas/BillListItems"
         "400":
           description: Invalid or unreadable document
         "413":
@@ -53,6 +55,31 @@ paths:
           description: Extraction rate limit exceeded
         "502":
           description: Document reading service failed
+  /catalog/scan-product:
+    post:
+      operationId: scanCatalogProduct
+      tags: [catalog]
+      summary: Suggest product details from an uploaded photo
+      description: Reads a product or stock-arrival photo without changing inventory. The seller reviews the suggestions before saving.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductPhotoDocument"
+      responses:
+        "200":
+          description: Suggested product fields; null means not visible or not certain
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductPhotoSuggestions"
+        "400":
+          description: Invalid or unreadable image
+        "429":
+          description: Extraction rate limit exceeded
+        "502":
+          description: Photo reading service failed
 components:
   schemas:
     HealthStatus:
@@ -62,7 +89,7 @@ components:
           type: string
       required:
         - status
-    ExtractBillingListBody:
+    BillListDocument:
       type: object
       properties:
         document:
@@ -73,7 +100,7 @@ components:
           maxLength: 150
       required: [document, filename]
       additionalProperties: false
-    ExtractBillingListResponse:
+    BillListItems:
       type: object
       properties:
         items:
@@ -97,5 +124,33 @@ components:
         unitPrice:
           type: [number, "null"]
       required: [name, quantity, unit, variant, unitPrice]
+      additionalProperties: false
+    ProductPhotoDocument:
+      type: object
+      properties:
+        document:
+          type: string
+          description: Base64 JPEG, PNG or WebP image data URL
+        filename:
+          type: string
+          maxLength: 150
+      required: [document, filename]
+      additionalProperties: false
+    ProductPhotoSuggestions:
+      type: object
+      properties:
+        name:
+          type: [string, "null"]
+        category:
+          type: [string, "null"]
+        variant:
+          type: [string, "null"]
+        unit:
+          type: [string, "null"]
+        unitPrice:
+          type: [number, "null"]
+        quantity:
+          type: [integer, "null"]
+      required: [name, category, variant, unit, unitPrice, quantity]
       additionalProperties: false
 

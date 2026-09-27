@@ -20,9 +20,11 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
-  ExtractBillingListBody,
-  ExtractBillingListResponse,
-  HealthStatus
+  BillListDocument,
+  BillListItems,
+  HealthStatus,
+  ProductPhotoDocument,
+  ProductPhotoSuggestions
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -142,7 +144,7 @@ export const getExtractBillingListUrl = () => {
  * Reads an uploaded list without saving the document or modifying a bill. Seller confirmation is required before adding items.
  * @summary Extract bill items from an image or PDF
  */
-export const extractBillingList = async (extractBillingListBody: ExtractBillingListBody, options?: Parameters<typeof customFetch>[1]): Promise<ExtractBillingListResponse> => {
+export const extractBillingList = async (billListDocument: BillListDocument, options?: Parameters<typeof customFetch>[1]): Promise<BillListItems> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -158,12 +160,12 @@ export const extractBillingList = async (extractBillingListBody: ExtractBillingL
     }
     return headers;
   };
-return customFetch<ExtractBillingListResponse>(getExtractBillingListUrl(),
+return customFetch<BillListItems>(getExtractBillingListUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(extractBillingListBody)
+    body: JSON.stringify(billListDocument)
   }
 );}
 
@@ -201,9 +203,9 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type ExtractBillingListMutationResult = NonNullable<Awaited<ReturnType<typeof extractBillingList>>>
-    export type ExtractBillingListMutationBody = BodyType<ExtractBillingListBody>
+    export type ExtractBillingListMutationBody = BodyType<BillListDocument>
     export type ExtractBillingListMutationError = ErrorType<void>
-    export type ExtractBillingListMutationVariables = {data: BodyType<ExtractBillingListBody>}
+    export type ExtractBillingListMutationVariables = {data: BodyType<BillListDocument>}
 
     /**
  * @summary Extract bill items from an image or PDF
@@ -217,5 +219,94 @@ export const useExtractBillingList = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getExtractBillingListMutationOptions(options));
+    }
+
+export const getScanCatalogProductUrl = () => {
+
+
+
+
+  return `/api/catalog/scan-product`
+}
+
+/**
+ * Reads a product or stock-arrival photo without changing inventory. The seller reviews the suggestions before saving.
+ * @summary Suggest product details from an uploaded photo
+ */
+export const scanCatalogProduct = async (productPhotoDocument: ProductPhotoDocument, options?: Parameters<typeof customFetch>[1]): Promise<ProductPhotoSuggestions> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ProductPhotoSuggestions>(getScanCatalogProductUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(productPhotoDocument)
+  }
+);}
+
+
+
+
+
+export const getScanCatalogProductMutationKey = () => ['scanCatalogProduct'] as const;
+
+export const getScanCatalogProductMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scanCatalogProduct>>, TError,ScanCatalogProductMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof scanCatalogProduct>>, TError,ScanCatalogProductMutationVariables, TContext> => {
+
+const mutationKey = getScanCatalogProductMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof scanCatalogProduct>>, ScanCatalogProductMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  scanCatalogProduct(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ScanCatalogProductMutationResult = NonNullable<Awaited<ReturnType<typeof scanCatalogProduct>>>
+    export type ScanCatalogProductMutationBody = BodyType<ProductPhotoDocument>
+    export type ScanCatalogProductMutationError = ErrorType<void>
+    export type ScanCatalogProductMutationVariables = {data: BodyType<ProductPhotoDocument>}
+
+    /**
+ * @summary Suggest product details from an uploaded photo
+ */
+export const useScanCatalogProduct = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scanCatalogProduct>>, TError,ScanCatalogProductMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof scanCatalogProduct>>,
+        TError,
+        ScanCatalogProductMutationVariables,
+        TContext
+      > => {
+      return useMutation(getScanCatalogProductMutationOptions(options));
     }
 

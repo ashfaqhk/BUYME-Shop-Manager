@@ -44,3 +44,26 @@ export const ExtractBillingListResponse = zod.object({
 })
 
 
+/**
+ * Reads a product or stock-arrival photo without changing inventory. The seller reviews the suggestions before saving.
+ * @summary Suggest product details from an uploaded photo
+ */
+export const scanCatalogProductBodyFilenameMax = 150;
+
+
+
+export const ScanCatalogProductBody = zod.object({
+  "document": zod.string().describe('Base64 JPEG, PNG or WebP image data URL'),
+  "filename": zod.string().max(scanCatalogProductBodyFilenameMax)
+})
+
+export const ScanCatalogProductResponse = zod.object({
+  "name": zod.string().nullable(),
+  "category": zod.string().nullable(),
+  "variant": zod.string().nullable(),
+  "unit": zod.string().nullable(),
+  "unitPrice": zod.number().nullable(),
+  "quantity": zod.number().int().nullable()
+})
+
+
