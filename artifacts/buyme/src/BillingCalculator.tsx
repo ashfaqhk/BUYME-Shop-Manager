@@ -72,6 +72,7 @@ export default function BillingCalculator({
   const ignoreClick = useRef<string | null>(null);
   const selectedProduct = products.find((product) => product.id === selectedId);
   const variant = selectedProduct?.variants.find((item) => item.id === variantId);
+  const selectedBillLine = selectedProduct && variant ? bill.find((line) => line.productId === selectedProduct.id && line.variantId === variant.id) : undefined;
   const itemCount = bill.length;
   const rowCount = Math.ceil(products.length / 4);
   const productRows = Array.from({ length: rowCount }, (_, index) => {
@@ -177,11 +178,12 @@ export default function BillingCalculator({
   }, [selectedId]);
 
   function openProduct(product: Product, button: HTMLButtonElement) {
-    if (isSoldOut(product) || !product.variants.some((item) => variantAvailable(product, item))) return;
+    if (isSoldOut(product) && !bill.some((line) => line.productId === product.id)) return;
     openerRef.current = button;
     catalogScrollRef.current = { x: window.scrollX, y: window.scrollY };
     setSelectedId(product.id);
-    const first = product.variants.filter((item) => variantAvailable(product, item)).sort((a, b) => a.price - b.price)[0];
+    const first = product.variants.filter((item) => variantAvailable(product, item)).sort((a, b) => a.price - b.price)[0]
+      ?? product.variants.find((item) => bill.some((line) => line.productId === product.id && line.variantId === item.id));
     setVariantId(first?.id ?? null);
     setQuantity(String(initialQuantity(first?.unit ?? 'piece')));
     setAddError(false);
@@ -243,7 +245,7 @@ export default function BillingCalculator({
                      onPointerCancel={cancelLongPress}
                      onPointerLeave={cancelLongPress}
                      onContextMenu={(event) => { if (canQuickAdd(product)) { event.preventDefault(); cancelLongPress(); ignoreClick.current = product.id; openProduct(product, event.currentTarget); } }}
-                     disabled={soldOut || !first}
+                      disabled={(soldOut && !bill.some((line) => line.productId === product.id)) || !first}
                      className="group min-w-0 touch-manipulation text-left outline-none disabled:cursor-not-allowed"
                      aria-label={`${soldOut ? 'Out of stock, ' : canQuickAdd(product) ? 'Quick add ' : 'Select '}${product.name}${first ? `, from ${money(first.price)} per ${first.unit}` : ''}${canQuickAdd(product) ? '. Long press to enter quantity.' : ''}`}
                     data-testid={`button-product-${product.id}`}
@@ -279,10 +281,10 @@ export default function BillingCalculator({
           <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-primary/20 sm:hidden" aria-hidden="true" />
           <div className="mb-4 flex items-start gap-3 border-b border-border pb-4">
             <ProductPhoto product={selectedProduct} className="size-16 shrink-0 rounded-xl border border-border sm:size-20" />
-            <div className="min-w-0">
-              <p className="text-[10px] font-extrabold uppercase tracking-[.16em] text-muted-foreground">Add to bill</p>
+             <div className="min-w-0">
+               <p className="text-[10px] font-extrabold uppercase tracking-[.16em] text-muted-foreground">Adjust item</p>
               <h2 className="mt-1 text-lg font-extrabold leading-tight tracking-tight sm:text-xl" data-testid="text-selected-product">{selectedProduct.name}</h2>
-              <p className="mt-1 text-xs font-semibold text-muted-foreground">Choose a size or type and quantity</p>
+               <p className="mt-1 text-xs font-semibold text-muted-foreground">Change what is in your bill, or add more</p>
             </div>
             <button type="button" onClick={closeProduct} className="ml-auto flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-primary hover:bg-primary/15" aria-label="Close product" data-testid="button-back-products"><X size={18} /></button>
           </div>
@@ -295,7 +297,7 @@ export default function BillingCalculator({
                     type="button"
                     role="radio"
                     aria-checked={variantId === option.id}
-                     disabled={!variantAvailable(selectedProduct, option)}
+                      disabled={!variantAvailable(selectedProduct, option) && !bill.some((line) => line.productId === selectedProduct.id && line.variantId === option.id)}
                      onClick={() => { setVariantId(option.id); setQuantity(String(initialQuantity(option.unit))); setAddError(false); }}
                      className={`overflow-hidden rounded-lg border-2 text-left transition-[border-color,background-color] disabled:cursor-not-allowed disabled:opacity-45 ${variantId === option.id ? 'border-primary bg-primary/8' : 'border-border bg-card hover:border-primary/40'}`}
                      aria-label={`${option.name}, ${money(option.price)} per ${option.unit}${!variantAvailable(selectedProduct, option) ? ', out of stock' : ''}`}
@@ -306,7 +308,15 @@ export default function BillingCalculator({
                   </button>
                 ))}
               </div>
-               <label htmlFor="calculator-quantity" className="mt-4 block text-xs font-extrabold uppercase tracking-[0.12em] text-muted-foreground">Quantity {variant ? `(${variant.unit})` : ''}</label>
+               {selectedBillLine && <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3" data-testid="current-product-in-bill">
+                 <div><p className="text-xs font-extrabold text-primary">Already in bill</p><p className="mt-0.5 text-xs text-muted-foreground">{selectedBillLine.variant} · {roundQuantity(selectedBillLine.qty)} {selectedBillLine.unit}</p></div>
+                 <div className="flex items-center rounded-xl border border-primary/25 bg-card">
+                   <button type="button" onClick={() => onAdjust(selectedBillLine.lineId, -Math.min(step, selectedBillLine.qty))} className="flex size-11 items-center justify-center text-primary" aria-label={`Remove one ${selectedBillLine.unit ?? 'unit'} of ${selectedProduct.name} from bill`} data-testid="button-sheet-bill-minus"><Minus size={18} /></button>
+                   <span className="min-w-7 text-center text-sm font-extrabold tabular-nums" data-testid="text-sheet-bill-quantity">{roundQuantity(selectedBillLine.qty)}</span>
+                   <button type="button" onClick={() => onAdjust(selectedBillLine.lineId, step)} disabled={availableQuantity !== undefined && availableQuantity < step} className="flex size-11 items-center justify-center text-primary disabled:opacity-40" aria-label={`Add one ${selectedBillLine.unit ?? 'unit'} of ${selectedProduct.name} to bill`} data-testid="button-sheet-bill-plus"><Plus size={18} /></button>
+                 </div>
+               </div>}
+                <label htmlFor="calculator-quantity" className="mt-4 block text-xs font-extrabold uppercase tracking-[0.12em] text-muted-foreground">Add more {variant ? `(${variant.unit})` : ''}</label>
                <div className="mt-2 flex items-center gap-2"><button type="button" onClick={() => setQuantity(String(roundQuantity(Math.max(0, parsedQuantity - step))))} disabled={!validQuantity || parsedQuantity <= step} className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-primary/30 bg-card text-primary disabled:opacity-40" aria-label={`Decrease quantity by ${step} ${variant?.unit ?? 'units'}`} data-testid="button-quantity-minus"><Minus size={18} /></button>
                <input
                 ref={quantityRef}

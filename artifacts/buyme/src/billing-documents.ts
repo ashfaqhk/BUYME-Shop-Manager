@@ -28,6 +28,7 @@ type ShopProfile = {
   upiId: string;
   upiName: string;
   qrImage?: string;
+  omitPaymentQr?: boolean;
   gstin: string;
   gstEnabled: boolean;
   gstRate: number;
@@ -163,7 +164,7 @@ export async function createBillPdf(bill: BillDocument, profile: ShopProfile, ki
   // remaining balance, so a fully paid customer isn't prompted to pay twice.
   const qrAmount = kind === 'bill' ? (bill.paymentMethod === 'UPI' ? (bill.paid > 0 ? bill.paid : bill.total) : 0) : Math.max(0, bill.total - bill.paid);
   const upiUri = getUpiUri(profile, qrAmount);
-  const qrData = upiUri ? await QRCode.toDataURL(upiUri, { width: 300, margin: 1 }) : qrAmount > 0 ? profile.qrImage : undefined;
+  const qrData = profile.omitPaymentQr ? undefined : upiUri ? await QRCode.toDataURL(upiUri, { width: 300, margin: 1 }) : qrAmount > 0 ? profile.qrImage : undefined;
   if (qrData) {
     pageBreak(48);
     y += 3;
