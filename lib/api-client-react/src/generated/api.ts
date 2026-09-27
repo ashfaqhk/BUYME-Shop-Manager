@@ -141,7 +141,7 @@ export const getExtractBillingListUrl = () => {
 }
 
 /**
- * Reads an uploaded list without saving the document or modifying a bill. Seller confirmation is required before adding items.
+ * Reads an uploaded list without saving the document or modifying a bill. Seller confirmation is required before adding items. Shares a global limit of 8 attempts per UTC day and 40 per UTC month with catalog scans; retries count.
  * @summary Extract bill items from an image or PDF
  */
 export const extractBillingList = async (billListDocument: BillListDocument, options?: Parameters<typeof customFetch>[1]): Promise<BillListItems> => {
@@ -230,7 +230,7 @@ export const getScanCatalogProductUrl = () => {
 }
 
 /**
- * Reads a product or stock-arrival photo without changing inventory. The seller reviews the suggestions before saving.
+ * Reads a product or stock-arrival photo without changing inventory. The seller reviews the suggestions before saving. Shares a global limit of 8 attempts per UTC day and 40 per UTC month with billing scans; retries count.
  * @summary Suggest product details from an uploaded photo
  */
 export const scanCatalogProduct = async (productPhotoDocument: ProductPhotoDocument, options?: Parameters<typeof customFetch>[1]): Promise<ProductPhotoSuggestions> => {

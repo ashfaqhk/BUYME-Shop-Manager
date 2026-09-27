@@ -33,7 +33,7 @@ paths:
       operationId: extractBillingList
       tags: [billing]
       summary: Extract bill items from an image or PDF
-      description: Reads an uploaded list without saving the document or modifying a bill. Seller confirmation is required before adding items.
+      description: Reads an uploaded list without saving the document or modifying a bill. Seller confirmation is required before adding items. Shares a global limit of 8 attempts per UTC day and 40 per UTC month with catalog scans; retries count.
       requestBody:
         required: true
         content:
@@ -52,7 +52,9 @@ paths:
         "413":
           description: File too large
         "429":
-          description: Extraction rate limit exceeded
+          description: Shared AI scan budget exhausted
+        "503":
+          description: AI scanning or budget storage unavailable
         "502":
           description: Document reading service failed
   /catalog/scan-product:
@@ -60,7 +62,7 @@ paths:
       operationId: scanCatalogProduct
       tags: [catalog]
       summary: Suggest product details from an uploaded photo
-      description: Reads a product or stock-arrival photo without changing inventory. The seller reviews the suggestions before saving.
+      description: Reads a product or stock-arrival photo without changing inventory. The seller reviews the suggestions before saving. Shares a global limit of 8 attempts per UTC day and 40 per UTC month with billing scans; retries count.
       requestBody:
         required: true
         content:
@@ -77,7 +79,9 @@ paths:
         "400":
           description: Invalid or unreadable image
         "429":
-          description: Extraction rate limit exceeded
+          description: Shared AI scan budget exhausted
+        "503":
+          description: AI scanning or budget storage unavailable
         "502":
           description: Photo reading service failed
 components:

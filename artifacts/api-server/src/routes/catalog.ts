@@ -1,8 +1,8 @@
 import { Router, type IRouter } from "express";
 import { ScanCatalogProductBody, ScanCatalogProductResponse } from "@workspace/api-zod";
+import { reserveScan } from "../lib/scan-budget";
 
 const router: IRouter = Router();
-const hits = new Map<string, { count: number; resetAt: number }>();
 const fields = ["name", "category", "variant", "unit", "unitPrice", "quantity"];
 
 function validImage(value: string): boolean {
@@ -21,21 +21,21 @@ router.post("/scan-product", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Choose a JPEG, PNG or WebP product photo smaller than 6 MB after resizing." });
     return;
   }
-  const now = Date.now();
-  const ip = req.ip ?? "unknown";
-  const usage = hits.get(ip);
-  if (usage && usage.resetAt > now && usage.count >= 8) {
-    res.status(429).json({ error: "Too many scans. Wait a few minutes and try again." });
-    return;
-  }
-  if (hits.size > 1000) for (const [address, record] of hits) if (record.resetAt <= now) hits.delete(address);
-  hits.set(ip, usage && usage.resetAt > now ? { ...usage, count: usage.count + 1 } : { count: 1, resetAt: now + 10 * 60_000 });
-
   const baseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
   const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
   if (!baseUrl || !apiKey) {
     req.log.error("Catalog scanning integration is not configured");
     res.status(503).json({ error: "Photo reading is unavailable right now. Try again later." });
+    return;
+  }
+  try {
+    if (!await reserveScan()) {
+      res.status(429).json({ error: "AI scan limit reached for today or this month. Enter product details manually, or try again after the UTC limit resets." });
+      return;
+    }
+  } catch (error) {
+    req.log.error({ error }, "Scan budget unavailable");
+    res.status(503).json({ error: "AI scanning is unavailable right now. Enter product details manually instead." });
     return;
   }
 

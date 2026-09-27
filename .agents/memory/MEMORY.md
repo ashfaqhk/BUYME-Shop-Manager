@@ -4,3 +4,4 @@
 - [AI PDF extraction](ai-pdf-extraction.md) — The Replit OpenAI Responses proxy accepts inline PDF input_file data URLs; this was confirmed with a real request.
 - [Orval schema naming](orval-schema-naming.md) — Name OpenAPI component schemas differently from operation-derived Zod exports to keep generated type re-exports collision-free.
 - [Android builds on Replit](android-build-environment.md) — The default Nix Android SDK includes unnecessary emulators; use a minimal composed SDK when building APKs here.
+- [AI scan spending protection](ai-scan-spending-protection.md) — Keep billable scan attempts under a shared persistent budget until owner identity can be established.

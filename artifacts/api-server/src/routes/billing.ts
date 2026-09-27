@@ -1,8 +1,8 @@
 import { Router, type IRouter } from "express";
 import { ExtractBillingListBody, ExtractBillingListResponse } from "@workspace/api-zod";
+import { reserveScan } from "../lib/scan-budget";
 
 const router: IRouter = Router();
-const hits = new Map<string, { count: number; resetAt: number }>();
 
 const itemSchema = {
   type: "object",
@@ -41,21 +41,21 @@ router.post("/extract-list", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Use a JPEG, PNG, WebP or PDF smaller than 6 MB." });
     return;
   }
-  const now = Date.now();
-  const ip = req.ip ?? "unknown";
-  const usage = hits.get(ip);
-  if (usage && usage.resetAt > now && usage.count >= 8) {
-    res.status(429).json({ error: "Too many scans. Wait a few minutes and try again." });
-    return;
-  }
-  if (hits.size > 1000) for (const [address, record] of hits) if (record.resetAt <= now) hits.delete(address);
-  hits.set(ip, usage && usage.resetAt > now ? { ...usage, count: usage.count + 1 } : { count: 1, resetAt: now + 10 * 60_000 });
-
   const baseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
   const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
   if (!baseUrl || !apiKey) {
     req.log.error("Document extraction integration is not configured");
     res.status(503).json({ error: "List reading is unavailable right now. Try again later." });
+    return;
+  }
+  try {
+    if (!await reserveScan()) {
+      res.status(429).json({ error: "AI scan limit reached for today or this month. Add bill items manually, or try again after the UTC limit resets." });
+      return;
+    }
+  } catch (error) {
+    req.log.error({ error }, "Scan budget unavailable");
+    res.status(503).json({ error: "AI scanning is unavailable right now. Add bill items manually instead." });
     return;
   }
 
