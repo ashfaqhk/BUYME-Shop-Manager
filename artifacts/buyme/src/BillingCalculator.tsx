@@ -1,0 +1,261 @@
+import { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, Check, Minus, Package, Plus, Search, Trash2, X } from 'lucide-react';
+import type { Product, Variant } from './catalog-data';
+
+export type CalculatorBillLine = {
+  lineId: string;
+  productId: string;
+  variantId: string;
+  name: string;
+  variant: string;
+  qty: number;
+  price: number;
+};
+
+type BillingCalculatorProps = {
+  products: Product[];
+  search: string;
+  onSearch: (value: string) => void;
+  bill: CalculatorBillLine[];
+  subtotal: number;
+  gst: number;
+  total: number;
+  onAdd: (product: Product, variant: Variant, quantity: number) => boolean;
+  onAdjust: (lineId: string, amount: number) => void;
+  onClear: () => void;
+  onPay: () => void;
+};
+
+const money = (amount: number) => new Intl.NumberFormat('en-IN', {
+  style: 'currency',
+  currency: 'INR',
+  maximumFractionDigits: amount % 1 === 0 ? 0 : 2,
+}).format(amount);
+
+function ProductPhoto({ product, className = '' }: { product: Product; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [product.image]);
+
+  if (!product.image || failed) {
+    return <span className={`flex items-center justify-center bg-secondary text-primary/45 ${className}`} aria-hidden="true"><Package size={32} strokeWidth={1.4} /></span>;
+  }
+  const src = product.image.startsWith('data:') || product.image.startsWith('blob:') || product.image.startsWith('http') || product.image.startsWith('/')
+    ? product.image
+    : `${import.meta.env.BASE_URL}${product.image}`;
+  return <img src={src} alt="" loading="lazy" onError={() => setFailed(true)} className={`object-cover ${className}`} />;
+}
+
+export default function BillingCalculator({
+  products, search, onSearch, bill, subtotal, gst, total, onAdd, onAdjust, onClear, onPay,
+}: BillingCalculatorProps) {
+  const [view, setView] = useState<'products' | 'variants' | 'review'>('products');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [variantId, setVariantId] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState('1');
+  const [addError, setAddError] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const quantityRef = useRef<HTMLInputElement>(null);
+  const selectedProduct = products.find((product) => product.id === selectedId);
+  const variant = selectedProduct?.variants.find((item) => item.id === variantId);
+  const itemCount = bill.reduce((sum, line) => sum + line.qty, 0);
+  const parsedQuantity = Number(quantity);
+  const validQuantity = Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0 && quantity.trim() !== '';
+
+  useEffect(() => {
+    if (view === 'variants' && !selectedProduct) setView('products');
+  }, [view, selectedProduct]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        if (view === 'variants') setView('products');
+        if (view === 'review') { setConfirmClear(false); setView('products'); }
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [view]);
+
+  function openProduct(product: Product) {
+    setSelectedId(product.id);
+    setVariantId(product.variants[0]?.id ?? null);
+    setQuantity('1');
+    setAddError(false);
+    setView('variants');
+  }
+
+  function addToBill(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedProduct || !variant || !validQuantity) return;
+    if (onAdd(selectedProduct, variant, parsedQuantity)) {
+      setView('products');
+      setSelectedId(null);
+      setQuantity('1');
+      setAddError(false);
+    } else {
+      setAddError(true);
+    }
+  }
+
+  return (
+    <section className="min-h-[60dvh] pb-28 font-sans text-foreground lg:pb-24" aria-label="Billing calculator">
+      {view === 'products' && (
+        <>
+          <label className="relative block">
+            <Search size={19} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-primary/65" aria-hidden="true" />
+            <span className="sr-only">Search products</span>
+            <input
+              ref={searchRef}
+              type="search"
+              value={search}
+              onChange={(event) => onSearch(event.target.value)}
+              placeholder="Search products..."
+              autoComplete="off"
+              className="h-12 w-full appearance-none rounded-xl border border-primary/20 bg-card pl-11 pr-11 text-sm font-semibold text-foreground shadow-[var(--shadow-sm)] outline-none placeholder:font-medium placeholder:text-muted-foreground focus:border-primary sm:h-14 sm:text-base"
+              aria-label="Search products"
+              data-testid="input-search-products"
+            />
+            {search && <button type="button" onClick={() => { onSearch(''); searchRef.current?.focus(); }} className="absolute right-2 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Clear product search" data-testid="button-clear-search"><X size={17} /></button>}
+          </label>
+          {products.length ? (
+            <div className="mt-4 grid grid-cols-3 gap-x-2.5 gap-y-5 sm:grid-cols-4 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7" data-testid="grid-products">
+              {products.map((product) => {
+                const first = product.variants.length ? product.variants.reduce((lowest, current) => current.price < lowest.price ? current : lowest) : undefined;
+                return (
+                  <button
+                    key={product.id}
+                    type="button"
+                    onClick={() => openProduct(product)}
+                    className="group min-w-0 text-left outline-none"
+                    aria-label={`Select ${product.name}${first ? `, from ${money(first.price)} per ${first.unit}` : ''}`}
+                    data-testid={`button-product-${product.id}`}
+                  >
+                    <span className="block aspect-square overflow-hidden rounded-xl border border-border/80 bg-secondary shadow-[var(--shadow-sm)] transition-[border-color,transform] duration-200 group-hover:-translate-y-0.5 group-hover:border-primary/60 group-focus-visible:border-primary">
+                      <ProductPhoto product={product} className="h-full w-full transition-transform duration-200 group-hover:scale-[1.04]" />
+                    </span>
+                    <span className="sr-only">{product.name}</span>
+                    <span className="mt-2 block truncate text-center text-[11px] font-bold leading-4 text-primary sm:text-xs" data-testid={`text-rate-${product.id}`}>
+                      {first ? <>{money(first.price)}<span className="font-medium text-muted-foreground"> / {first.unit}</span></> : 'No rate'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-2xl border border-dashed border-border bg-card px-6 py-14 text-center" data-testid="status-no-products">
+              <Search size={25} strokeWidth={1.6} className="mx-auto text-primary/50" />
+              <p className="mt-3 text-sm font-bold">{search ? 'No matching products' : 'No products yet'}</p>
+              {search && <button type="button" onClick={() => { onSearch(''); searchRef.current?.focus(); }} className="mt-3 text-xs font-extrabold text-primary underline underline-offset-4" data-testid="button-show-all-products">Clear search</button>}
+            </div>
+          )}
+        </>
+      )}
+
+      {view === 'variants' && selectedProduct && (
+        <div className="mx-auto max-w-3xl" data-testid="view-variants">
+          <button type="button" onClick={() => setView('products')} className="mb-5 inline-flex items-center gap-2 rounded-lg py-2 text-sm font-bold text-primary hover:opacity-70" aria-label="Back to products" data-testid="button-back-products"><ArrowLeft size={18} /> Products</button>
+          <div className="mb-6 flex items-center gap-4 border-b border-border pb-5">
+            <ProductPhoto product={selectedProduct} className="size-20 shrink-0 rounded-xl border border-border sm:size-24" />
+            <div className="min-w-0">
+              <h2 className="text-xl font-extrabold leading-tight tracking-tight sm:text-2xl" data-testid="text-selected-product">{selectedProduct.name}</h2>
+              <p className="mt-1 text-xs font-semibold text-muted-foreground">Choose a size or type</p>
+            </div>
+          </div>
+          {selectedProduct.variants.length ? (
+            <form onSubmit={addToBill}>
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3" role="radiogroup" aria-label={`${selectedProduct.name} size or type`}>
+                {selectedProduct.variants.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={variantId === option.id}
+                    onClick={() => { setVariantId(option.id); setAddError(false); quantityRef.current?.focus(); }}
+                    className={`overflow-hidden rounded-xl border-2 text-left transition-[border-color,background-color] ${variantId === option.id ? 'border-primary bg-primary/8' : 'border-border bg-card hover:border-primary/40'}`}
+                    aria-label={`${option.name}, ${money(option.price)} per ${option.unit}`}
+                    data-testid={`button-variant-${option.id}`}
+                  >
+                    <ProductPhoto product={{ ...selectedProduct, image: option.image || selectedProduct.image }} className="aspect-[1.5] w-full" />
+                    <span className="block p-3"><span className="flex items-start justify-between gap-1"><span className="text-sm font-extrabold leading-5">{option.name}</span>{variantId === option.id && <Check size={16} className="shrink-0 text-primary" aria-hidden="true" />}</span><span className="mt-2 block text-base font-extrabold text-primary">{money(option.price)} <span className="text-[11px] font-medium text-muted-foreground">/ {option.unit}</span></span></span>
+                  </button>
+                ))}
+              </div>
+              <label htmlFor="calculator-quantity" className="mt-8 block text-xs font-extrabold uppercase tracking-[0.12em] text-muted-foreground">Quantity</label>
+              <input
+                ref={quantityRef}
+                id="calculator-quantity"
+                type="number"
+                inputMode="numeric"
+                min="1"
+                step="1"
+                value={quantity}
+                onChange={(event) => { setQuantity(event.target.value); setAddError(false); }}
+                className="mt-2 h-18 w-full rounded-xl border-2 border-primary/30 bg-card px-5 text-3xl font-extrabold tabular-nums text-primary outline-none focus:border-primary sm:max-w-64"
+                aria-label={`Quantity of ${selectedProduct.name}`}
+                data-testid="input-product-quantity"
+              />
+              {addError && <p role="alert" className="mt-3 text-sm font-bold text-destructive" data-testid="status-add-error">Could not add this quantity. Please check it and try again.</p>}
+              <button type="submit" disabled={!variant || !validQuantity} className="mt-5 flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 text-sm font-extrabold text-primary-foreground shadow-[var(--shadow-md)] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-w-64" data-testid="button-add-to-bill">
+                Add to bill{variant && validQuantity ? ` · ${money(variant.price * parsedQuantity)}` : ''} <ArrowRight size={18} />
+              </button>
+            </form>
+          ) : <div className="rounded-xl border border-dashed border-border bg-card p-8 text-center text-sm font-semibold text-muted-foreground">No sizes or rates available for this product.</div>}
+        </div>
+      )}
+
+      {view === 'review' && (
+        <div className="mx-auto max-w-3xl" data-testid="view-bill-review">
+          <div className="mb-5 flex items-center justify-between gap-3">
+            <button type="button" onClick={() => { setConfirmClear(false); setView('products'); }} className="inline-flex items-center gap-2 rounded-lg py-2 text-sm font-bold text-primary hover:opacity-70" aria-label="Back to products" data-testid="button-back-from-review"><ArrowLeft size={18} /> Products</button>
+            {bill.length > 0 && <button type="button" onClick={() => setConfirmClear(true)} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs font-bold text-destructive hover:bg-destructive/10" data-testid="button-clear-bill"><Trash2 size={15} /> Clear bill</button>}
+          </div>
+          <div className="mb-5 border-b border-border pb-4">
+            <h2 className="font-display text-3xl leading-none text-primary sm:text-4xl">Review bill</h2>
+            <p className="mt-2 text-xs font-semibold text-muted-foreground">{itemCount} {itemCount === 1 ? 'item' : 'items'} in this bill</p>
+          </div>
+          {confirmClear && <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/25 bg-destructive/5 p-4" role="alertdialog" aria-label="Clear the entire bill?">
+            <p className="text-sm font-bold">Remove every item from this bill?</p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setConfirmClear(false)} className="rounded-lg border border-border px-3 py-2 text-xs font-bold" data-testid="button-cancel-clear">Cancel</button>
+              <button type="button" onClick={() => { onClear(); setConfirmClear(false); }} className="rounded-lg bg-destructive px-3 py-2 text-xs font-bold text-destructive-foreground" data-testid="button-confirm-clear">Clear all</button>
+            </div>
+          </div>}
+          {bill.length ? <>
+            <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card" data-testid="list-bill-lines">
+              {bill.map((line) => <div key={line.lineId} className="flex flex-wrap items-center gap-x-3 gap-y-3 px-3 py-4 sm:flex-nowrap sm:px-5" data-testid={`row-bill-${line.lineId}`}>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-extrabold" data-testid={`text-line-name-${line.lineId}`}>{line.name}</p>
+                  <p className="mt-0.5 text-xs font-medium text-muted-foreground">{line.variant} · {money(line.price)} each</p>
+                </div>
+                <div className="flex h-10 shrink-0 items-center rounded-lg border border-border bg-background">
+                  <button type="button" onClick={() => onAdjust(line.lineId, -1)} className="flex size-10 items-center justify-center rounded-l-lg hover:bg-muted" aria-label={`Decrease ${line.name} quantity by one`} data-testid={`button-decrease-${line.lineId}`}><Minus size={16} /></button>
+                  <span className="min-w-7 text-center text-sm font-extrabold tabular-nums" data-testid={`text-line-quantity-${line.lineId}`}>{line.qty}</span>
+                  <button type="button" onClick={() => onAdjust(line.lineId, 1)} className="flex size-10 items-center justify-center rounded-r-lg hover:bg-muted" aria-label={`Increase ${line.name} quantity by one`} data-testid={`button-increase-${line.lineId}`}><Plus size={16} /></button>
+                </div>
+                <span className="min-w-20 text-right text-sm font-extrabold tabular-nums text-primary" data-testid={`text-line-total-${line.lineId}`}>{money(line.price * line.qty)}</span>
+                <button type="button" onClick={() => onAdjust(line.lineId, -line.qty)} className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={`Remove ${line.name} from bill`} data-testid={`button-remove-${line.lineId}`}><Trash2 size={16} /></button>
+              </div>)}
+            </div>
+            <div className="mt-5 rounded-xl bg-secondary/70 p-5 sm:p-6">
+              <div className="flex justify-between text-sm font-semibold text-muted-foreground"><span>Subtotal</span><span className="tabular-nums">{money(subtotal)}</span></div>
+              {gst > 0 && <div className="mt-3 flex justify-between text-sm font-semibold text-muted-foreground"><span>GST</span><span className="tabular-nums">{money(gst)}</span></div>}
+              <div className="mt-4 flex items-end justify-between border-t border-primary/15 pt-4 text-primary"><span className="text-sm font-extrabold">Total due</span><strong className="text-2xl font-extrabold tabular-nums sm:text-3xl" data-testid="text-review-total">{money(total)}</strong></div>
+            </div>
+            <button type="button" onClick={onPay} className="mt-4 flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-extrabold text-primary-foreground hover:opacity-90" data-testid="button-collect-payment">Payment <ArrowRight size={18} /></button>
+          </> : <div className="rounded-xl border border-dashed border-border bg-card px-6 py-14 text-center" data-testid="status-empty-bill"><Package className="mx-auto text-primary/45" size={32} strokeWidth={1.5} /><p className="mt-3 text-sm font-bold">Your bill is empty</p><button type="button" onClick={() => setView('products')} className="mt-4 rounded-lg bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-find-products">Find products</button></div>}
+        </div>
+      )}
+
+      {view !== 'review' && <div className="fixed bottom-[70px] left-0 right-0 z-30 border-t border-primary/15 bg-card/95 px-4 py-3 shadow-[0_-8px_30px_rgba(54,48,81,.09)] backdrop-blur-md lg:bottom-0 lg:left-[264px] lg:px-8" aria-label="Bill total bar" data-testid="bar-bill-total">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
+          <div className="min-w-0">
+            <span className="block text-[10px] font-extrabold uppercase tracking-[0.11em] text-muted-foreground" data-testid="text-item-count">{itemCount} {itemCount === 1 ? 'item' : 'items'}</span>
+            <strong className="block truncate text-xl font-extrabold leading-tight tabular-nums text-primary sm:text-2xl" data-testid="text-running-total">{money(total)}</strong>
+          </div>
+          <button type="button" onClick={() => { setConfirmClear(false); setView('review'); }} disabled={!bill.length} className="flex h-11 min-w-28 shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-extrabold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-36" aria-label={`Next, review bill with ${itemCount} items totalling ${money(total)}`} data-testid="button-review-bill">Next <ArrowRight size={18} /></button>
+        </div>
+      </div>}
+    </section>
+  );
+}

@@ -1,0 +1,2 @@
+- [PDF downloads in preview](pdf-download-preview.md) — Download events may be absent despite valid PDF blobs; verify file contents and offer an Open PDF fallback.
+- [Payment QR semantics](payment-qr-semantics.md) — Generated UPI QRs can carry an amount; uploaded QR images are opaque and require explicit recipient/amount confirmation.
