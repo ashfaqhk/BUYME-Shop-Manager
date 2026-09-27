@@ -5,16 +5,6 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-export interface HealthStatus {
-  status: string;
-}
-
-export interface ExtractBillingListBody {
-  /** Base64 data URL for a JPEG, PNG, WebP image, or PDF */
-  document: string;
-  /** @maxLength 150 */
-  filename: string;
-}
 
 export interface DetectedBillingItem {
   name: string;
@@ -27,8 +17,3 @@ export interface DetectedBillingItem {
   /** @nullable */
   unitPrice: number | null;
 }
-
-export interface ExtractBillingListResponse {
-  items: DetectedBillingItem[];
-}
-

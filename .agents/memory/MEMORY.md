@@ -1,3 +1,4 @@
 - [PDF downloads in preview](pdf-download-preview.md) — Download events may be absent despite valid PDF blobs; verify file contents and offer an Open PDF fallback.
 - [Payment QR semantics](payment-qr-semantics.md) — Generated UPI QRs can carry an amount; uploaded QR images are opaque and require explicit recipient/amount confirmation.
 - [Catalog demo data](catalog-demo-data.md) — Never silently append sample products to a saved shop catalog; a saved empty catalog is intentional data.
+- [AI PDF extraction](ai-pdf-extraction.md) — The Replit OpenAI Responses proxy accepts inline PDF input_file data URLs; this was confirmed with a real request.

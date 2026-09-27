@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, Minus, Package, Plus, Search, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, FilePlus2, Minus, Package, Plus, Search, Trash2, X } from 'lucide-react';
 import type { Product, Variant } from './catalog-data';
+import type { ImportBillLine } from './list-import-types';
+import ListImportDialog from './ListImportDialog';
 
 export type CalculatorBillLine = {
   lineId: string;
@@ -24,6 +26,7 @@ type BillingCalculatorProps = {
   onAdjust: (lineId: string, amount: number) => void;
   onClear: () => void;
   onPay: () => void;
+  onImport?: (lines: ImportBillLine[]) => string | null;
 };
 
 const money = (amount: number) => new Intl.NumberFormat('en-IN', {
@@ -46,7 +49,7 @@ function ProductPhoto({ product, className = '' }: { product: Product; className
 }
 
 export default function BillingCalculator({
-  products, search, onSearch, bill, subtotal, gst, total, onAdd, onAdjust, onClear, onPay,
+  products, search, onSearch, bill, subtotal, gst, total, onAdd, onAdjust, onClear, onPay, onImport,
 }: BillingCalculatorProps) {
   const [view, setView] = useState<'products' | 'variants' | 'review'>('products');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -54,6 +57,8 @@ export default function BillingCalculator({
   const [quantity, setQuantity] = useState('1');
   const [addError, setAddError] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const quantityRef = useRef<HTMLInputElement>(null);
   const selectedProduct = products.find((product) => product.id === selectedId);
@@ -98,28 +103,23 @@ export default function BillingCalculator({
     }
   }
 
+  function openSearch() {
+    setView('products');
+    setSearchOpen(true);
+    window.setTimeout(() => searchRef.current?.focus(), 0);
+  }
+
   return (
-    <section className="min-h-[60dvh] pb-28 font-sans text-foreground lg:pb-24" aria-label="Billing calculator">
+    <section className="min-h-[60dvh] pb-40 font-sans text-foreground lg:pb-28" aria-label="Billing calculator">
+      {view !== 'review' && <div className="mb-5 flex items-end justify-between gap-4 rounded-2xl border border-primary/15 bg-primary px-5 py-4 text-primary-foreground shadow-[var(--shadow-sm)] sm:mb-7 sm:px-7 sm:py-5" aria-label="Current bill total" data-testid="panel-calculator-total">
+        <div className="min-w-0"><p className="text-[10px] font-extrabold uppercase tracking-[.2em] opacity-75">Current bill · {itemCount} {itemCount === 1 ? 'item' : 'items'}</p><strong className="mt-1 block text-4xl font-extrabold leading-none tracking-tight tabular-nums sm:text-5xl" data-testid="text-running-total" aria-live="polite">{money(total)}</strong></div>
+        <span className="hidden shrink-0 pb-1 text-right text-[11px] font-semibold opacity-70 sm:block">Add items below<br />Review before payment</span>
+      </div>}
       {view === 'products' && (
         <>
-          <label className="relative block">
-            <Search size={19} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-primary/65" aria-hidden="true" />
-            <span className="sr-only">Search products</span>
-            <input
-              ref={searchRef}
-              type="search"
-              value={search}
-              onChange={(event) => onSearch(event.target.value)}
-              placeholder="Search products..."
-              autoComplete="off"
-              className="h-12 w-full appearance-none rounded-xl border border-primary/20 bg-card pl-11 pr-11 text-sm font-semibold text-foreground shadow-[var(--shadow-sm)] outline-none placeholder:font-medium placeholder:text-muted-foreground focus:border-primary sm:h-14 sm:text-base"
-              aria-label="Search products"
-              data-testid="input-search-products"
-            />
-            {search && <button type="button" onClick={() => { onSearch(''); searchRef.current?.focus(); }} className="absolute right-2 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Clear product search" data-testid="button-clear-search"><X size={17} /></button>}
-          </label>
+          {search && !searchOpen && <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-primary/20 bg-card px-4 py-2.5 text-xs font-bold text-primary" data-testid="status-active-search"><span className="min-w-0 truncate">Results for “{search}”</span><button type="button" onClick={() => onSearch('')} aria-label="Clear product search" className="flex shrink-0 items-center gap-1" data-testid="button-clear-search"><X size={15} /> Clear</button></div>}
           {products.length ? (
-            <div className="mt-4 grid grid-cols-3 gap-x-2.5 gap-y-5 sm:grid-cols-4 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7" data-testid="grid-products">
+            <div className="grid grid-cols-4 gap-x-2 gap-y-5 sm:grid-cols-5 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8" data-testid="grid-products">
               {products.map((product) => {
                 const first = product.variants.length ? product.variants.reduce((lowest, current) => current.price < lowest.price ? current : lowest) : undefined;
                 return (
@@ -135,7 +135,7 @@ export default function BillingCalculator({
                       <ProductPhoto product={product} className="h-full w-full transition-transform duration-200 group-hover:scale-[1.04]" />
                     </span>
                     <span className="sr-only">{product.name}</span>
-                    <span className="mt-2 block truncate text-center text-[11px] font-bold leading-4 text-primary sm:text-xs" data-testid={`text-rate-${product.id}`}>
+                    <span className="mt-1.5 block truncate text-center text-[10px] font-bold leading-4 text-primary sm:text-xs" data-testid={`text-rate-${product.id}`}>
                       {first ? <>{money(first.price)}<span className="font-medium text-muted-foreground"> / {first.unit}</span></> : 'No rate'}
                     </span>
                   </button>
@@ -146,7 +146,7 @@ export default function BillingCalculator({
             <div className="mt-5 rounded-2xl border border-dashed border-border bg-card px-6 py-14 text-center" data-testid="status-no-products">
               <Search size={25} strokeWidth={1.6} className="mx-auto text-primary/50" />
               <p className="mt-3 text-sm font-bold">{search ? 'No matching products' : 'No products yet'}</p>
-              {search && <button type="button" onClick={() => { onSearch(''); searchRef.current?.focus(); }} className="mt-3 text-xs font-extrabold text-primary underline underline-offset-4" data-testid="button-show-all-products">Clear search</button>}
+              {search && <button type="button" onClick={() => { onSearch(''); setSearchOpen(false); }} className="mt-3 text-xs font-extrabold text-primary underline underline-offset-4" data-testid="button-show-all-products">Clear search</button>}
             </div>
           )}
         </>
@@ -247,15 +247,30 @@ export default function BillingCalculator({
         </div>
       )}
 
-      {view !== 'review' && <div className="fixed bottom-[70px] left-0 right-0 z-30 border-t border-primary/15 bg-card/95 px-4 py-3 shadow-[0_-8px_30px_rgba(54,48,81,.09)] backdrop-blur-md lg:bottom-0 lg:left-[264px] lg:px-8" aria-label="Bill total bar" data-testid="bar-bill-total">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
-          <div className="min-w-0">
-            <span className="block text-[10px] font-extrabold uppercase tracking-[0.11em] text-muted-foreground" data-testid="text-item-count">{itemCount} {itemCount === 1 ? 'item' : 'items'}</span>
-            <strong className="block truncate text-xl font-extrabold leading-tight tabular-nums text-primary sm:text-2xl" data-testid="text-running-total">{money(total)}</strong>
-          </div>
-          <button type="button" onClick={() => { setConfirmClear(false); setView('review'); }} disabled={!bill.length} className="flex h-11 min-w-28 shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-extrabold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-36" aria-label={`Next, review bill with ${itemCount} items totalling ${money(total)}`} data-testid="button-review-bill">Next <ArrowRight size={18} /></button>
+      {view !== 'review' && <div className="fixed bottom-[70px] left-0 right-0 z-30 border-t border-primary/15 bg-card/95 px-3 py-2.5 shadow-[0_-8px_30px_rgba(54,48,81,.09)] backdrop-blur-md lg:bottom-0 lg:left-[264px] lg:px-8" aria-label="Billing actions" data-testid="bar-bill-total">
+        {view === 'products' && searchOpen && <label className="relative mx-auto mb-2 block max-w-6xl">
+          <Search size={19} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-primary/65" aria-hidden="true" />
+          <span className="sr-only">Search items</span>
+          <input
+            ref={searchRef}
+            type="search"
+            value={search}
+            onChange={(event) => onSearch(event.target.value)}
+            placeholder="Search items..."
+            autoComplete="off"
+            className="h-12 w-full appearance-none rounded-xl border border-primary/20 bg-card pl-11 pr-11 text-sm font-semibold text-foreground shadow-[var(--shadow-sm)] outline-none placeholder:font-medium placeholder:text-muted-foreground focus:border-primary sm:h-14 sm:text-base"
+            aria-label="Search items"
+            data-testid="input-search-products"
+          />
+          <button type="button" onClick={() => { onSearch(''); setSearchOpen(false); }} className="absolute right-2 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Close item search" data-testid="button-close-search"><X size={17} /></button>
+        </label>}
+        <div className="mx-auto grid max-w-6xl grid-cols-[1fr_1.3fr_1fr] gap-2 sm:grid-cols-[1fr_1.4fr_1.2fr] sm:gap-3">
+          <button type="button" onClick={openSearch} className="flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-xl border border-primary/25 bg-background px-2 text-xs font-extrabold text-primary hover:bg-secondary sm:text-sm" aria-label="Search items" data-testid="button-search-items"><Search size={17} className="shrink-0" /> <span className="sm:hidden">Search</span><span className="hidden sm:inline">Search items</span></button>
+          <button type="button" onClick={() => { onSearch(''); setImportOpen(true); }} className="flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-xl border border-primary/25 bg-background px-2 text-xs font-extrabold text-primary hover:bg-secondary sm:text-sm" aria-label="Add list or add items" data-testid="button-add-list"><FilePlus2 size={17} className="shrink-0" /> <span className="sm:hidden">Add list</span><span className="hidden sm:inline">Add list / Add items</span></button>
+          <button type="button" onClick={() => { setConfirmClear(false); setView('review'); }} disabled={!bill.length} className="flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-xl bg-primary px-2 text-xs font-extrabold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 sm:text-sm" aria-label={`Next, review bill with ${itemCount} items totalling ${money(total)}`} data-testid="button-review-bill">Next <ArrowRight size={17} className="shrink-0" /></button>
         </div>
       </div>}
+      {importOpen && <ListImportDialog products={products} onImport={onImport} onClose={() => setImportOpen(false)} />}
     </section>
   );
 }

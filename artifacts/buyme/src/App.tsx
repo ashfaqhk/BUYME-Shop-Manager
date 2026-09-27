@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 import { categories, readCatalog, type Product, type Variant } from './catalog-data';
 import BillingCalculator from './BillingCalculator';
+import type { ImportBillLine } from './list-import-types';
 import { createBillPdf, getUpiUri } from './billing-documents';
 import { prepareQrImage, validatePaymentQR, type PaymentQR } from './payment-profiles';
 import {
@@ -170,13 +171,13 @@ function App() {
 
   const addToBill = (product: Product, variant: Variant, quantity = 1) => {
     if (!Number.isSafeInteger(quantity) || quantity < 1) return false;
-    const alreadyAdded = bill.find((line) => line.variantId === variant.id)?.qty ?? 0;
+    const alreadyAdded = bill.filter((line) => line.productId === product.id && line.variantId === variant.id).reduce((sum, line) => sum + line.qty, 0);
     if (typeof variant.stock === 'number' && alreadyAdded + quantity > variant.stock) {
       flash(`Only ${Math.max(0, variant.stock - alreadyAdded)} left in stock`);
       return false;
     }
     setBill((current) => {
-      const existing = current.find((line) => line.variantId === variant.id);
+      const existing = current.find((line) => line.lineId === `${product.id}-${variant.id}`);
       if (existing) return current.map((line) => line.lineId === existing.lineId ? { ...line, qty: line.qty + quantity } : line);
       return [...current, { lineId: `${product.id}-${variant.id}`, productId: product.id, variantId: variant.id, name: product.name, variant: variant.name, qty: quantity, price: variant.price }];
     });
@@ -184,11 +185,56 @@ function App() {
     return true;
   };
 
+  const importToBill = (items: ImportBillLine[]): string | null => {
+    if (!items.length) return 'Select at least one item to add.';
+    const prepared: BillLine[] = [];
+    for (const item of items) {
+      if (!item.name.trim() || !Number.isSafeInteger(item.qty) || item.qty < 1 || !Number.isFinite(item.price) || item.price <= 0) {
+        return 'Each item needs a name, whole-number quantity, and a price above zero.';
+      }
+      if (item.productId || item.variantId) {
+        const product = catalog.find((entry) => entry.id === item.productId);
+        const variant = product?.variants.find((entry) => entry.id === item.variantId);
+        if (!product || !variant) return `Choose an available catalog type for ${item.name}.`;
+        const price = Math.round(item.price * 100) / 100;
+        if (price <= 0) return `Enter a valid price for ${item.name}.`;
+        const lineId = price === variant.price ? `${product.id}-${variant.id}` : `${product.id}-${variant.id}-${price.toFixed(2)}`;
+        const existing = prepared.find((line) => line.lineId === lineId);
+        if (existing) existing.qty += item.qty;
+        else prepared.push({ lineId, productId: product.id, variantId: variant.id, name: product.name, variant: variant.name, qty: item.qty, price });
+      } else {
+        const price = Math.round(item.price * 100) / 100;
+        if (price <= 0) return `Enter a valid price for ${item.name}.`;
+        prepared.push({ lineId: `import-${crypto.randomUUID()}`, productId: '', variantId: '', name: item.name.trim(), variant: item.variant.trim() || 'Imported item', qty: item.qty, price });
+      }
+    }
+    for (const line of prepared) {
+      const variant = catalog.find((entry) => entry.id === line.productId)?.variants.find((entry) => entry.id === line.variantId);
+      const inBill = bill.filter((entry) => entry.productId === line.productId && entry.variantId === line.variantId).reduce((sum, entry) => sum + entry.qty, 0);
+      const importing = prepared.filter((entry) => entry.productId === line.productId && entry.variantId === line.variantId).reduce((sum, entry) => sum + entry.qty, 0);
+      if (typeof variant?.stock === 'number' && inBill + importing > variant.stock) {
+        return `${line.name} (${line.variant}): only ${Math.max(0, variant.stock - inBill)} left in stock.`;
+      }
+    }
+    setBill((current) => {
+      const next = [...current];
+      for (const line of prepared) {
+        const index = next.findIndex((entry) => entry.lineId === line.lineId);
+        if (index >= 0) next[index] = { ...next[index], qty: next[index].qty + line.qty };
+        else next.push(line);
+      }
+      return next;
+    });
+    flash(`${prepared.reduce((sum, line) => sum + line.qty, 0)} items added from list`);
+    return null;
+  };
+
   const adjustBill = (lineId: string, amount: number) => {
     const selected = bill.find((line) => line.lineId === lineId);
     if (selected && amount > 0) {
       const variant = catalog.find((item) => item.id === selected.productId)?.variants.find((item) => item.id === selected.variantId);
-      if (typeof variant?.stock === 'number' && selected.qty + amount > variant.stock) {
+      const alreadyAdded = bill.filter((line) => line.productId === selected.productId && line.variantId === selected.variantId).reduce((sum, line) => sum + line.qty, 0);
+      if (typeof variant?.stock === 'number' && alreadyAdded + amount > variant.stock) {
         flash('No more stock available');
         return;
       }
@@ -216,8 +262,8 @@ function App() {
     const sale: Sale = { id: `BM-${Date.now().toString().slice(-6)}`, createdAt: new Date().toISOString(), lines: bill, subtotal: billSubtotal, gst: billGst, total: billTotal, paid, paymentMethod: method, paymentQr: method === 'UPI' ? paymentQr : undefined, customer };
     setSales((current) => [sale, ...current]);
     setCatalog((current) => current.map((product) => ({ ...product, variants: product.variants.map((variant) => {
-      const sold = bill.find((line) => line.variantId === variant.id);
-      return sold && typeof variant.stock === 'number' ? { ...variant, stock: Math.max(0, variant.stock - sold.qty) } : variant;
+      const sold = bill.filter((line) => line.productId === product.id && line.variantId === variant.id).reduce((sum, line) => sum + line.qty, 0);
+      return sold && typeof variant.stock === 'number' ? { ...variant, stock: Math.max(0, variant.stock - sold) } : variant;
     }) })));
     setBill([]);
     setSearch('');
@@ -282,7 +328,7 @@ function App() {
         </header>
 
         <div className="mx-auto max-w-[1480px] px-5 pb-24 pt-7 sm:px-8 lg:px-10 lg:pb-10">
-          {activeSection === 'Billing' && <BillingCalculator key={sales.length} products={filteredProducts} search={search} onSearch={setSearch} bill={bill} subtotal={billSubtotal} gst={billGst} total={billTotal} onAdd={addToBill} onAdjust={adjustBill} onClear={() => { setBill([]); flash('Current bill cleared'); }} onPay={() => setPaymentOpen(true)} />}
+          {activeSection === 'Billing' && <BillingCalculator key={sales.length} products={filteredProducts} search={search} onSearch={setSearch} bill={bill} subtotal={billSubtotal} gst={billGst} total={billTotal} onAdd={addToBill} onImport={importToBill} onAdjust={adjustBill} onClear={() => { setBill([]); flash('Current bill cleared'); }} onPay={() => setPaymentOpen(true)} />}
           {activeSection === 'Catalog' && <CatalogView catalog={catalog} onAdd={() => setProductModal({ open: true })} onEdit={(product) => setProductModal({ open: true, product })} />}
           {activeSection === 'Insights' && <InsightsView sales={sales} catalog={catalog} />}
           {activeSection === 'Notifications' && <NotificationsView lowStock={lowStock} sales={sales} onGoCatalog={() => changeSection('Catalog')} />}

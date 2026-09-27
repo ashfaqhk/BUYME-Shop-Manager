@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: billing
+    description: Bill item extraction
 paths:
   /healthz:
     get:
@@ -24,6 +26,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /billing/extract-list:
+    post:
+      operationId: extractBillingList
+      tags: [billing]
+      summary: Extract bill items from an image or PDF
+      description: Reads an uploaded list without saving the document or modifying a bill. Seller confirmation is required before adding items.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExtractBillingListBody"
+      responses:
+        "200":
+          description: Detected items, which may require correction before billing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExtractBillingListResponse"
+        "400":
+          description: Invalid or unreadable document
+        "413":
+          description: File too large
+        "429":
+          description: Extraction rate limit exceeded
+        "502":
+          description: Document reading service failed
 components:
   schemas:
     HealthStatus:
@@ -33,4 +62,40 @@ components:
           type: string
       required:
         - status
+    ExtractBillingListBody:
+      type: object
+      properties:
+        document:
+          type: string
+          description: Base64 data URL for a JPEG, PNG, WebP image, or PDF
+        filename:
+          type: string
+          maxLength: 150
+      required: [document, filename]
+      additionalProperties: false
+    ExtractBillingListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DetectedBillingItem"
+      required: [items]
+      additionalProperties: false
+    DetectedBillingItem:
+      type: object
+      properties:
+        name:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        unit:
+          type: [string, "null"]
+        variant:
+          type: [string, "null"]
+        unitPrice:
+          type: [number, "null"]
+      required: [name, quantity, unit, variant, unitPrice]
+      additionalProperties: false
 
