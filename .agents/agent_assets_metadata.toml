@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "GD0bX4LD2H-rH5dmX_q6z"
+uri = "file://artifacts/buyme/downloads/BUYME-debug.apk"
+type = "unspecified"
+title = "BUYME Android APK"
+description = "Install on Android 6.0+ phones and tablets. Debug-signed for direct testing; opens the BUYME web app through the device browser and needs internet to load it."
+logical_id = "460d7946-0b99-4537-9988-1522d9fa064a"
+content_hash = "sha256:eb03d7150d43fc8ba947accb7e56051a9c2b206ed626bd67119153a6905b5d5a"
+size = 1207462
+mtime_ms = 1790524774675
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:96387411-2e6a-4274-ab28-c881e129713f/460d7946-0b99-4537-9988-1522d9fa064a/5c6df126-08e8-489e-9384-284abbe6a6fd"
+storage_version_token = "1790524823420522"
+content_type = "application/octet-stream"

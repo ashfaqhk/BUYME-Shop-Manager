@@ -1,0 +1,15 @@
+{
+  "id": "/",
+  "name": "BUYME Shop Counter",
+  "short_name": "BUYME",
+  "description": "Make bills, manage products and track your stock.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#faf9f6",
+  "theme_color": "#4b408b",
+  "icons": [
+    { "src": "/buyme-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/buyme-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

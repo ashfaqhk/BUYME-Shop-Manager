@@ -3,3 +3,4 @@
 - [Catalog demo data](catalog-demo-data.md) — Never silently append sample products to a saved shop catalog; a saved empty catalog is intentional data.
 - [AI PDF extraction](ai-pdf-extraction.md) — The Replit OpenAI Responses proxy accepts inline PDF input_file data URLs; this was confirmed with a real request.
 - [Orval schema naming](orval-schema-naming.md) — Name OpenAPI component schemas differently from operation-derived Zod exports to keep generated type re-exports collision-free.
+- [Android builds on Replit](android-build-environment.md) — The default Nix Android SDK includes unnecessary emulators; use a minimal composed SDK when building APKs here.
