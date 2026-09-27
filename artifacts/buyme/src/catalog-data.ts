@@ -103,25 +103,19 @@ export const seedCatalog: Product[] = [
 const seedById = new Map(seedCatalog.map((product) => [product.id, product]));
 
 export function readCatalog(): Product[] {
+  const stored = window.localStorage.getItem('buyme-catalog');
+  // Sample products are only for a brand-new shop. Never add them to a saved catalog,
+  // including a deliberately empty one.
+  if (stored === null) return seedCatalog;
   try {
-    const stored = window.localStorage.getItem('buyme-catalog');
-    if (!stored) return seedCatalog;
     const parsed: unknown = JSON.parse(stored);
-    if (!Array.isArray(parsed)) return seedCatalog;
+    if (!Array.isArray(parsed)) return [];
     const previous = parsed as Product[];
-    const hydrated = previous.map((product) => ({
+    return previous.map((product) => ({
       ...product,
-      image: product.image ?? seedById.get(product.id)?.image,
+      image: product.image ?? (seedById.get(product.id)?.name === product.name ? seedById.get(product.id)?.image : undefined),
     }));
-    const migrationKey = 'buyme-catalog-gallery-v1';
-    if (window.localStorage.getItem(migrationKey)) return hydrated;
-    // Add new sample products once, without overwriting products, prices, or stock
-    // that a shopkeeper may already have edited.
-    const ids = new Set(hydrated.map((product) => product.id));
-    const upgraded = [...hydrated, ...seedCatalog.filter((product) => Number(product.id.slice(1)) >= 9 && !ids.has(product.id))];
-    window.localStorage.setItem(migrationKey, '1');
-    return upgraded;
   } catch {
-    return seedCatalog;
+    return [];
   }
 }

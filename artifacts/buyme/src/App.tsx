@@ -157,9 +157,6 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const today = new Date().toDateString();
-  const todaySales = useMemo(() => sales.filter((sale) => new Date(sale.createdAt).toDateString() === today), [sales, today]);
-  const revenue = todaySales.reduce((sum, sale) => sum + sale.paid, 0);
   const lowStock = useMemo(() => catalog.flatMap((product) => product.variants.map((variant) => ({ product, variant })).filter(({ variant }) => typeof variant.stock === 'number' && variant.stock <= (variant.threshold ?? 0))), [catalog]);
   const billSubtotal = bill.reduce((sum, line) => sum + line.price * line.qty, 0);
   const billGst = settings.gstEnabled ? Math.round(billSubtotal * settings.gstRate) / 100 : 0;
@@ -287,7 +284,7 @@ function App() {
         <div className="mx-auto max-w-[1480px] px-5 pb-24 pt-7 sm:px-8 lg:px-10 lg:pb-10">
           {activeSection === 'Billing' && <BillingCalculator key={sales.length} products={filteredProducts} search={search} onSearch={setSearch} bill={bill} subtotal={billSubtotal} gst={billGst} total={billTotal} onAdd={addToBill} onAdjust={adjustBill} onClear={() => { setBill([]); flash('Current bill cleared'); }} onPay={() => setPaymentOpen(true)} />}
           {activeSection === 'Catalog' && <CatalogView catalog={catalog} onAdd={() => setProductModal({ open: true })} onEdit={(product) => setProductModal({ open: true, product })} />}
-          {activeSection === 'Insights' && <InsightsView sales={sales} catalog={catalog} revenue={revenue} />}
+          {activeSection === 'Insights' && <InsightsView sales={sales} catalog={catalog} />}
           {activeSection === 'Notifications' && <NotificationsView lowStock={lowStock} sales={sales} onGoCatalog={() => changeSection('Catalog')} />}
           {activeSection === 'Broadcast' && <BroadcastView settings={settings} onOpen={() => setBroadcastOpen(true)} />}
           {activeSection === 'Settings' && <SettingsView settings={settings} onSave={(next) => { setSettings(next); flash('Shop settings saved'); }} />}
@@ -442,13 +439,72 @@ function CatalogView({ catalog, onAdd, onEdit }: {
   </div>;
 }
 
-function InsightsView({ sales, catalog, revenue }: { sales: Sale[]; catalog: Product[]; revenue: number }) {
-  const productTotals = useMemo(() => Object.entries(sales.flatMap((sale) => sale.lines).reduce<Record<string, number>>((acc, line) => { acc[line.name] = (acc[line.name] ?? 0) + line.qty; return acc; }, {})).sort((a, b) => b[1] - a[1]), [sales]);
-  const cash = sales.filter((sale) => sale.paymentMethod === 'Cash').reduce((sum, sale) => sum + sale.paid, 0);
-  const upi = sales.filter((sale) => sale.paymentMethod === 'UPI').reduce((sum, sale) => sum + sale.paid, 0);
-  const stockValue = catalog.flatMap((product) => product.variants).reduce((sum, variant) => sum + (variant.stock ?? 0) * variant.price, 0);
-  const week = [34, 46, 39, 57, 49, 67, 52];
-  return <div className="rise-in"><div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="mb-1 text-sm font-semibold text-accent">A little clarity, every day.</p><h2 className="font-display text-[2.35rem] leading-none tracking-tight text-primary">What’s moving.</h2><p className="mt-2 text-sm text-muted-foreground">A simple read on this week at {catalog.length ? 'your shop' : 'the shop'}.</p></div><button className="flex items-center gap-2 self-start rounded-xl border border-border bg-card px-3.5 py-2.5 text-xs font-bold text-muted-foreground hover:border-primary/30 hover:text-primary" data-testid="button-insights-range"><CalendarDays size={15} /> Last 7 days <ChevronDown size={14} /></button></div><div className="grid gap-4 lg:grid-cols-[1.25fr_.75fr]"><section className="rounded-2xl border border-border/80 bg-primary p-5 text-primary-foreground shadow-[0_16px_36px_hsl(var(--primary)/.14)] sm:p-6"><div className="flex items-start justify-between"><div><p className="text-xs font-bold text-primary-foreground/60">Collected revenue</p><p className="mt-2 text-4xl font-extrabold tracking-tight">{money(revenue || 28460)}</p><p className="mt-2 flex items-center gap-1 text-xs font-bold text-sidebar-primary"><ArrowUpRight size={14} /> 8.7% compared to last week</p></div><span className="rounded-xl bg-primary-foreground/10 p-3 text-sidebar-primary"><BarChart3 size={20} /></span></div><div className="mt-8 flex h-28 items-end gap-2 sm:gap-4">{week.map((height, index) => <div key={index} className="flex flex-1 flex-col items-center gap-2"><div className={`w-full rounded-t-md ${index === 5 ? 'bg-sidebar-primary' : 'bg-primary-foreground/20'}`} style={{ height: `${height}%` }} /><span className="text-[9px] font-mono-app text-primary-foreground/45">{['M', 'T', 'W', 'T', 'F', 'S', 'S'][index]}</span></div>)}</div></section><section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6"><p className="text-xs font-bold text-muted-foreground">Payment mix</p><div className="mt-5 flex items-center gap-5"><div className="relative flex h-28 w-28 shrink-0 items-center justify-center rounded-full" style={{ background: `conic-gradient(hsl(var(--primary)) 0 58%, hsl(var(--accent)) 58% 100%)` }}><div className="flex h-20 w-20 items-center justify-center rounded-full bg-card text-center"><span className="text-lg font-extrabold">₹</span></div></div><div className="space-y-4 text-xs"><div><div className="flex items-center gap-2 font-bold"><span className="h-2.5 w-2.5 rounded-full bg-primary" /> UPI <span className="ml-2 font-mono-app text-muted-foreground">{money(upi || 16500)}</span></div><p className="ml-4 mt-1 text-[10px] text-muted-foreground">58% of collected</p></div><div><div className="flex items-center gap-2 font-bold"><span className="h-2.5 w-2.5 rounded-full bg-accent" /> Cash <span className="ml-2 font-mono-app text-muted-foreground">{money(cash || 11960)}</span></div><p className="ml-4 mt-1 text-[10px] text-muted-foreground">42% of collected</p></div></div></div></section></div><div className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]"><section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6"><div className="flex items-center justify-between"><div><p className="text-xs font-bold text-muted-foreground">Top sellers</p><h3 className="mt-1 text-lg font-extrabold">Customers came for these</h3></div><span className="rounded-lg bg-chart-3/12 px-2 py-1 text-[10px] font-bold text-chart-3">This week</span></div><div className="mt-5 space-y-4">{(productTotals.length ? productTotals.slice(0, 4) : [['Aashirvaad Atta', 42], ['Thums Up', 31], ['Tata Salt', 24]] as [string, number][]).map(([name, amount], index) => <div key={name} className="flex items-center gap-3"><span className="font-mono-app text-[10px] text-muted-foreground">0{index + 1}</span><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/8 text-[10px] font-extrabold text-primary">{initials(name)}</span><span className="flex-1 text-xs font-bold">{name}</span><span className="text-xs font-extrabold">{amount} sold</span><div className="hidden h-1.5 w-20 overflow-hidden rounded-full bg-muted sm:block"><div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(25, 100 - index * 17)}%` }} /></div></div>)}</div></section><section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6"><div className="flex items-center justify-between"><div><p className="text-xs font-bold text-muted-foreground">Inventory snapshot</p><h3 className="mt-1 text-lg font-extrabold">Worth keeping an eye on</h3></div><span className="rounded-lg bg-chart-4/20 px-2 py-1 text-[10px] font-bold">{money(stockValue || 18640)} value</span></div><div className="mt-5 space-y-3">{catalog.flatMap((product) => product.variants.map((variant) => ({ product, variant }))).filter(({ variant }) => typeof variant.stock === 'number' && variant.stock <= (variant.threshold ?? 0)).slice(0, 3).map(({ product, variant }) => <div key={variant.id} className="flex items-center gap-3 rounded-xl bg-accent/7 p-3"><AlertTriangle size={16} className="text-accent" /><div className="flex-1"><p className="text-xs font-bold">{product.name}</p><p className="mt-0.5 text-[10px] text-muted-foreground">{variant.name} · threshold {variant.threshold}</p></div><span className="font-mono-app text-xs font-bold text-accent">{variant.stock} left</span></div>)}{catalog.flatMap((product) => product.variants).every((v) => typeof v.stock !== 'number' || v.stock > (v.threshold ?? 0)) && <div className="rounded-xl bg-chart-3/10 p-4 text-xs font-bold text-chart-3">No urgent stock alerts. Nice work.</div>}</div></section></div></div>;
+function InsightsView({ sales, catalog }: { sales: Sale[]; catalog: Product[] }) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() - (6 - index));
+    return date;
+  });
+  const start = days[0].getTime();
+  const previousStart = new Date(days[0]);
+  previousStart.setDate(previousStart.getDate() - 7);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  const currentSales = sales.filter((sale) => {
+    const date = new Date(sale.createdAt).getTime();
+    return date >= start && date < tomorrow.getTime();
+  });
+  const revenue = currentSales.reduce((sum, sale) => sum + sale.paid, 0);
+  const previousRevenue = sales.filter((sale) => {
+    const date = new Date(sale.createdAt).getTime();
+    return date >= previousStart.getTime() && date < start;
+  }).reduce((sum, sale) => sum + sale.paid, 0);
+  const dailyRevenue = days.map((date) => {
+    const next = new Date(date);
+    next.setDate(date.getDate() + 1);
+    return currentSales.filter((sale) => {
+      const time = new Date(sale.createdAt).getTime();
+      return time >= date.getTime() && time < next.getTime();
+    }).reduce((sum, sale) => sum + sale.paid, 0);
+  });
+  const maxDailyRevenue = Math.max(...dailyRevenue);
+  const cash = currentSales.filter((sale) => sale.paymentMethod === 'Cash').reduce((sum, sale) => sum + sale.paid, 0);
+  const upi = currentSales.filter((sale) => sale.paymentMethod === 'UPI').reduce((sum, sale) => sum + sale.paid, 0);
+  const collected = cash + upi;
+  const upiPercent = collected > 0 ? upi / collected * 100 : 0;
+  const productTotals = Object.values(currentSales.flatMap((sale) => sale.lines).reduce<Record<string, { name: string; qty: number }>>((acc, line) => {
+    const key = line.productId || line.name;
+    if (!acc[key]) acc[key] = { name: line.name, qty: 0 };
+    acc[key].qty += line.qty;
+    return acc;
+  }, {})).sort((a, b) => b.qty - a.qty);
+  const trackedStock = catalog.flatMap((product) => product.variants.map((variant) => ({ product, variant }))).filter(({ variant }) => typeof variant.stock === 'number');
+  const stockValue = trackedStock.reduce((sum, { variant }) => sum + variant.stock! * variant.price, 0);
+  const alerts = trackedStock.filter(({ variant }) => variant.stock! <= (variant.threshold ?? 0)).slice(0, 3);
+
+  return <div className="rise-in">
+    <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+      <div><p className="mb-1 text-sm font-semibold text-accent">A little clarity, every day.</p><h2 className="font-display text-[2.35rem] leading-none tracking-tight text-primary">What’s moving.</h2><p className="mt-2 text-sm text-muted-foreground">A simple read on the last 7 days at your shop.</p></div>
+      <span className="flex items-center gap-2 self-start rounded-xl border border-border bg-card px-3.5 py-2.5 text-xs font-bold text-muted-foreground"><CalendarDays size={15} /> Last 7 days</span>
+    </div>
+    {currentSales.length === 0 && <div className="mb-5 rounded-2xl border border-border bg-card p-6 text-center shadow-[var(--shadow-sm)]" data-testid="insights-empty"><ReceiptIndianRupee className="mx-auto text-primary" size={30} /><h3 className="mt-3 text-lg font-extrabold">No sales in the last 7 days</h3><p className="mt-1 text-sm text-muted-foreground">Saved bills will appear here once you record a payment.</p></div>}
+    <div className="grid gap-4 lg:grid-cols-[1.25fr_.75fr]">
+      <section className="rounded-2xl border border-border/80 bg-primary p-5 text-primary-foreground shadow-[0_16px_36px_hsl(var(--primary)/.14)] sm:p-6">
+        <div className="flex items-start justify-between"><div><p className="text-xs font-bold text-primary-foreground/60">Collected revenue · last 7 days</p><p className="mt-2 text-4xl font-extrabold tracking-tight">{money(revenue)}</p><p className="mt-2 text-xs font-bold text-sidebar-primary">{previousRevenue > 0 ? `${((revenue - previousRevenue) / previousRevenue * 100).toFixed(1)}% compared to previous 7 days` : 'No previous-period revenue to compare'}</p></div><span className="rounded-xl bg-primary-foreground/10 p-3 text-sidebar-primary"><BarChart3 size={20} /></span></div>
+        <div className="mt-8 flex h-28 items-end gap-2 sm:gap-4">{days.map((date, index) => <div key={date.toISOString()} className="flex flex-1 flex-col items-center gap-2" title={`${date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}: ${money(dailyRevenue[index])}`}><div className="flex h-24 w-full items-end"><div className={`w-full rounded-t-md ${dailyRevenue[index] === maxDailyRevenue && maxDailyRevenue > 0 ? 'bg-sidebar-primary' : 'bg-primary-foreground/20'}`} style={{ height: maxDailyRevenue > 0 ? `${dailyRevenue[index] / maxDailyRevenue * 100}%` : '0%' }} /></div><span className="text-[9px] font-mono-app text-primary-foreground/45">{date.toLocaleDateString('en-IN', { weekday: 'short' })}</span></div>)}</div>
+      </section>
+      <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6">
+        <p className="text-xs font-bold text-muted-foreground">Payment mix · last 7 days</p>
+        {collected > 0 ? <div className="mt-5 flex items-center gap-5"><div className="relative flex h-28 w-28 shrink-0 items-center justify-center rounded-full" style={{ background: `conic-gradient(hsl(var(--primary)) 0 ${upiPercent}%, hsl(var(--accent)) ${upiPercent}% 100%)` }}><div className="flex h-20 w-20 items-center justify-center rounded-full bg-card text-center"><span className="text-lg font-extrabold">₹</span></div></div><div className="space-y-4 text-xs"><div><div className="flex items-center gap-2 font-bold"><span className="h-2.5 w-2.5 rounded-full bg-primary" /> UPI <span className="ml-2 font-mono-app text-muted-foreground">{money(upi)}</span></div><p className="ml-4 mt-1 text-[10px] text-muted-foreground">{upiPercent.toFixed(1)}% of collected</p></div><div><div className="flex items-center gap-2 font-bold"><span className="h-2.5 w-2.5 rounded-full bg-accent" /> Cash <span className="ml-2 font-mono-app text-muted-foreground">{money(cash)}</span></div><p className="ml-4 mt-1 text-[10px] text-muted-foreground">{(100 - upiPercent).toFixed(1)}% of collected</p></div></div></div> : <p className="mt-5 text-xs text-muted-foreground">No collected payments in this period.</p>}
+      </section>
+    </div>
+    <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]">
+      <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6"><div className="flex items-center justify-between"><div><p className="text-xs font-bold text-muted-foreground">Top sellers</p><h3 className="mt-1 text-lg font-extrabold">Customers came for these</h3></div><span className="rounded-lg bg-chart-3/12 px-2 py-1 text-[10px] font-bold text-chart-3">Last 7 days</span></div><div className="mt-5 space-y-4">{productTotals.length ? productTotals.slice(0, 4).map(({ name, qty }, index) => <div key={`${name}-${index}`} className="flex items-center gap-3"><span className="font-mono-app text-[10px] text-muted-foreground">0{index + 1}</span><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/8 text-[10px] font-extrabold text-primary">{initials(name)}</span><span className="flex-1 text-xs font-bold">{name}</span><span className="text-xs font-extrabold">{qty} sold</span><div className="hidden h-1.5 w-20 overflow-hidden rounded-full bg-muted sm:block"><div className="h-full rounded-full bg-primary" style={{ width: `${qty / productTotals[0].qty * 100}%` }} /></div></div>) : <p className="text-xs text-muted-foreground">No products sold in this period.</p>}</div></section>
+      <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6"><div className="flex items-center justify-between gap-2"><div><p className="text-xs font-bold text-muted-foreground">Inventory snapshot</p><h3 className="mt-1 text-lg font-extrabold">Worth keeping an eye on</h3></div><span className="rounded-lg bg-chart-4/20 px-2 py-1 text-[10px] font-bold">{trackedStock.length ? `${money(stockValue)} value` : 'Stock not tracked'}</span></div><div className="mt-5 space-y-3">{alerts.map(({ product, variant }) => <div key={`${product.id}-${variant.id}`} className="flex items-center gap-3 rounded-xl bg-accent/7 p-3"><AlertTriangle size={16} className="text-accent" /><div className="flex-1"><p className="text-xs font-bold">{product.name}</p><p className="mt-0.5 text-[10px] text-muted-foreground">{variant.name} · threshold {variant.threshold ?? 0}</p></div><span className="font-mono-app text-xs font-bold text-accent">{variant.stock} left</span></div>)}{trackedStock.length > 0 && alerts.length === 0 && <div className="rounded-xl bg-chart-3/10 p-4 text-xs font-bold text-chart-3">No urgent stock alerts. Nice work.</div>}{trackedStock.length === 0 && <p className="text-xs text-muted-foreground">Add stock quantities to your catalog to see inventory value and alerts.</p>}</div></section>
+    </div>
+  </div>;
 }
 
 function NotificationsView({ lowStock, sales, onGoCatalog }: { lowStock: { product: Product; variant: Variant }[]; sales: Sale[]; onGoCatalog: () => void }) {
@@ -560,7 +616,7 @@ function ProductModal({ product, onClose, onSave, onDelete }: { product?: Produc
   };
   const save = () => {
     if (!form.name.trim()) return window.alert('Enter a product name.');
-    if (!form.image) return window.alert('Attach a product photo.');
+    if (!product && !form.image) return window.alert('Attach a product photo.');
     if (form.variants.some((variant) => !variant.name.trim() || !Number.isFinite(variant.price) || variant.price <= 0)) return window.alert('Enter a name and price for each option.');
     onSave({ ...form, name: form.name.trim(), updatedAt: 'Just now' });
   };
