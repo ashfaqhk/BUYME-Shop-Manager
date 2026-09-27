@@ -73,6 +73,13 @@ export default function BillingCalculator({
   const selectedProduct = products.find((product) => product.id === selectedId);
   const variant = selectedProduct?.variants.find((item) => item.id === variantId);
   const itemCount = bill.length;
+  const rowCount = Math.ceil(products.length / 4);
+  const productRows = Array.from({ length: rowCount }, (_, index) => {
+    const rowSize = Math.floor(products.length / rowCount);
+    const extra = products.length % rowCount;
+    const start = index * rowSize + Math.min(index, extra);
+    return products.slice(start, start + rowSize + Number(index < extra));
+  });
   const parsedQuantity = Number(quantity);
   const validQuantity = isValidQuantity(parsedQuantity) && quantity.trim() !== '';
   const step = quantityStep(variant?.unit ?? '');
@@ -217,8 +224,9 @@ export default function BillingCalculator({
           </fieldset>
           {search && !searchOpen && <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-primary/20 bg-card px-4 py-2.5 text-xs font-bold text-primary" data-testid="status-active-search"><span className="min-w-0 truncate">Results for “{search}”</span><button type="button" onClick={() => onSearch('')} aria-label="Clear product search" className="flex shrink-0 items-center gap-1" data-testid="button-clear-search"><X size={15} /> Clear</button></div>}
           {products.length ? (
-            <div className="grid grid-cols-4 gap-x-2 gap-y-5 sm:grid-cols-5 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8" data-testid="grid-products">
-              {products.map((product) => {
+            <div className="space-y-5 sm:space-y-6" data-testid="grid-products">
+              {productRows.map((row, index) => <div key={index} className="grid gap-x-2 sm:gap-x-4" style={{ gridTemplateColumns: `repeat(${Math.max(2, row.length)}, minmax(0, 1fr))` }}>
+                {row.map((product) => {
                  const soldOut = isSoldOut(product);
                   const first = product.variants.filter((item) => variantAvailable(product, item)).sort((a, b) => a.price - b.price)[0]
                    ?? product.variants.slice().sort((a, b) => a.price - b.price)[0];
@@ -252,7 +260,8 @@ export default function BillingCalculator({
                      {soldOut && <span className="mt-0.5 block text-center text-[9px] font-bold text-muted-foreground">Out of stock</span>}
                   </button>
                 );
-              })}
+                })}
+              </div>)}
             </div>
           ) : (
             <div className="mt-5 rounded-2xl border border-dashed border-border bg-card px-6 py-14 text-center" data-testid="status-no-products">
