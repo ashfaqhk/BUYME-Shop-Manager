@@ -1,12 +1,13 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
-import { categories, readCatalog, type Product, type Variant } from './catalog-data';
+import { categories, type Product, type Variant } from './catalog-data';
 import BillingCalculator from './BillingCalculator';
 import CatalogScanDialog from './CatalogScanDialog';
 import type { ImportBillLine } from './list-import-types';
 import { createBillPdf, getUpiUri } from './billing-documents';
 import { accountUpiUri, prepareQrImage, validatePaymentQR, type PaymentQR } from './payment-profiles';
 import { roundMoney, roundQuantity, validQuantity } from './quantity-units';
+import { AccountBar, BuymeAccess, uploadSellerPhoto, useSellerShop } from './SellerAccess';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -19,6 +20,7 @@ import {
   CircleCheck,
   CircleHelp,
   Download,
+  ImagePlus,
   IndianRupee,
   LayoutDashboard,
   Menu,
@@ -45,7 +47,7 @@ import {
 
 type Section = 'Billing' | 'Catalog' | 'Insights' | 'Notifications' | 'Broadcast' | 'Settings';
 type AppVersion = 'basic' | 'full';
-type PaymentMethod = 'Cash' | 'UPI';
+type PaymentMethod = 'Cash' | 'UPI' | 'Credit';
 
 type BillLine = {
   lineId: string;
@@ -58,6 +60,8 @@ type BillLine = {
   price: number;
 };
 
+type PaymentEntry = { method: 'Cash' | 'UPI'; amount: number; createdAt: string };
+
 type Sale = {
   id: string;
   createdAt: string;
@@ -68,6 +72,7 @@ type Sale = {
   discount?: number;
   paid: number;
   paymentMethod: PaymentMethod;
+  payments?: PaymentEntry[];
   paymentQr?: PaymentQR;
   customerName?: string;
   customer?: string;
@@ -100,31 +105,10 @@ const seedSettings: ShopSettings = {
 const navItems: { label: Section; icon: typeof LayoutDashboard; helper?: string }[] = [
   { label: 'Billing', icon: ReceiptIndianRupee, helper: 'Counter' },
   { label: 'Catalog', icon: Package, helper: 'Products' },
-  { label: 'Insights', icon: BarChart3, helper: 'Your numbers' },
   { label: 'Notifications', icon: Bell, helper: 'Keep in the loop' },
+  { label: 'Insights', icon: BarChart3, helper: 'Your numbers' },
   { label: 'Broadcast', icon: MessageCircleMore, helper: 'Reach customers' },
 ];
-
-function readStore<T>(key: string, fallback: T): T {
-  try {
-    const value = window.localStorage.getItem(key);
-    return value ? JSON.parse(value) as T : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function readSettings(): ShopSettings {
-  const stored = readStore('buyme-settings', seedSettings);
-  // The previous sample UPI handle was illustrative, not an actual account.
-  const legacyId = stored.upiId === 'sharmastore@upi' ? '' : stored.upiId?.trim() || '';
-  const savedProfiles = Array.isArray(stored.paymentQrs) ? stored.paymentQrs : [];
-  const paymentQrs = savedProfiles.length
-    ? savedProfiles
-    : legacyId ? [{ id: crypto.randomUUID(), label: 'Primary UPI', upiId: legacyId, upiName: stored.upiName || stored.shopName }] : [];
-  // Clear the legacy field so deleting the final saved QR doesn't recreate it on reload.
-  return { ...seedSettings, ...stored, upiId: '', paymentQrs };
-}
 
 function money(value: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value);
@@ -138,13 +122,14 @@ function initials(name: string) {
   return name.split(' ').map((part) => part[0]).slice(0, 2).join('');
 }
 
-function App() {
+function ShopWorkspace() {
+  const { shop, save, saveStatus, retrySave } = useSellerShop();
   const [activeSection, setActiveSection] = useState<Section>('Billing');
-  const [appVersion, setAppVersion] = useState<AppVersion>(() => window.localStorage.getItem('buyme-app-version') === 'basic' ? 'basic' : 'full');
+  const appVersion: AppVersion = shop.mode;
   const swipeStart = useRef<{ x: number; y: number } | null>(null);
-  const [catalog, setCatalog] = useState<Product[]>(readCatalog);
-  const [sales, setSales] = useState<Sale[]>(() => readStore('buyme-sales', []));
-  const [settings, setSettings] = useState<ShopSettings>(readSettings);
+  const [catalog, setCatalog] = useState<Product[]>(() => shop.catalog);
+  const [sales, setSales] = useState<Sale[]>(() => shop.sales as Sale[]);
+  const [settings, setSettings] = useState<ShopSettings>(() => ({ ...seedSettings, ...shop.settings, upiId: '', paymentQrs: Array.isArray(shop.settings.paymentQrs) ? shop.settings.paymentQrs as PaymentQR[] : [] } as ShopSettings));
   const [bill, setBill] = useState<BillLine[]>([]);
   const [search, setSearch] = useState('');
   const [mobileNav, setMobileNav] = useState(false);
@@ -155,13 +140,17 @@ function App() {
   const [toast, setToast] = useState('');
   const [broadcastOpen, setBroadcastOpen] = useState(false);
 
-  useEffect(() => { window.localStorage.setItem('buyme-catalog', JSON.stringify(catalog)); }, [catalog]);
-  useEffect(() => { window.localStorage.setItem('buyme-sales', JSON.stringify(sales)); }, [sales]);
-  useEffect(() => { window.localStorage.setItem('buyme-app-version', appVersion); }, [appVersion]);
+  const initialized = useRef(false);
+  const persistTimer = useRef<number | null>(null);
   useEffect(() => {
-    window.localStorage.setItem('buyme-settings', JSON.stringify(settings));
     document.documentElement.classList.toggle('dark', settings.darkMode);
-  }, [settings]);
+    if (!initialized.current) { initialized.current = true; return; }
+    if (persistTimer.current !== null) window.clearTimeout(persistTimer.current);
+    persistTimer.current = window.setTimeout(() => {
+      void save({ catalog, sales, settings: settings as unknown as Record<string, unknown> }).catch(() => undefined);
+    }, 350);
+    return () => { if (persistTimer.current !== null) window.clearTimeout(persistTimer.current); };
+  }, [catalog, sales, settings, save]);
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(''), 2800);
@@ -178,12 +167,6 @@ function App() {
 
   const flash = (message: string) => setToast(message);
   const changeSection = (section: Section) => { setActiveSection(section); setMobileNav(false); };
-  const changeVersion = (version: AppVersion) => {
-    setAppVersion(version);
-    setReceiptSale(null);
-    if (version === 'basic' && activeSection !== 'Billing' && activeSection !== 'Catalog') changeSection('Billing');
-  };
-
   const addToBill = (product: Product, variant: Variant, quantity = 1) => {
     if (!validQuantity(quantity)) return false;
     const alreadyAdded = bill.filter((line) => line.productId === product.id && line.variantId === variant.id).reduce((sum, line) => sum + line.qty, 0);
@@ -291,7 +274,8 @@ function App() {
 
   const completePayment = (method: PaymentMethod, paid: number, discount: number, customerName?: string, customer?: string, paymentQr?: PaymentQR) => {
     const total = roundMoney(billTotal - discount);
-    const sale: Sale = { id: `BM-${Date.now().toString().slice(-6)}`, createdAt: new Date().toISOString(), lines: bill, subtotal: billSubtotal, gst: billGst, discount, total, paid, paymentMethod: method, paymentQr: method === 'UPI' ? paymentQr : undefined, customerName, customer };
+    const createdAt = new Date().toISOString();
+    const sale: Sale = { id: `BM-${Date.now().toString().slice(-6)}`, createdAt, lines: bill, subtotal: billSubtotal, gst: billGst, discount, total, paid, paymentMethod: method, payments: method === 'Credit' || paid <= 0 ? [] : [{ method, amount: paid, createdAt }], paymentQr: method === 'UPI' ? paymentQr : undefined, customerName, customer };
     setSales((current) => [sale, ...current]);
     setCatalog((current) => current.map((product) => ({ ...product, variants: product.variants.map((variant) => {
       const sold = bill.filter((line) => line.productId === product.id && line.variantId === variant.id).reduce((sum, line) => sum + line.qty, 0);
@@ -302,7 +286,17 @@ function App() {
     setPaymentOpen(false);
     if (appVersion === 'full') setReceiptSale(sale);
     else setReceiptSale(null);
-    flash(appVersion === 'basic' ? `Payment of ${money(paid)} recorded` : 'Payment recorded. Bill is ready.');
+    flash(method === 'Credit' ? `Credit of ${money(total)} recorded` : appVersion === 'basic' ? `Payment of ${money(paid)} recorded` : 'Payment recorded. Bill is ready.');
+  };
+
+  const collectCredit = (saleId: string, method: 'Cash' | 'UPI', amount: number) => {
+    const createdAt = new Date().toISOString();
+    setSales((current) => current.map((sale) => {
+      if (sale.id !== saleId) return sale;
+      const payments = [...salePayments(sale), { method, amount, createdAt }];
+      return { ...sale, paid: Math.min(sale.total, roundMoney(collectedAmount(sale) + amount)), paymentMethod: method, payments };
+    }));
+    flash(`${money(amount)} credit payment recorded`);
   };
 
   return (
@@ -372,13 +366,15 @@ function App() {
         </header>}
 
         <div className={`mx-auto max-w-[1480px] px-5 sm:px-8 lg:px-10 ${activeSection === 'Billing' ? 'pb-14 pt-5 sm:pt-7' : 'pb-24 pt-7 lg:pb-10'}`}>
-           {appVersion === 'basic' && <div className="mb-5 flex flex-wrap items-center justify-between gap-3" data-testid="basic-navigation">
+           <div className="mb-4 flex justify-end"><AccountBar email={shop.email} role={shop.role} mode={appVersion} saveStatus={saveStatus} onRetry={retrySave} /></div>
+   {appVersion === 'basic' && <div className="mb-5 flex flex-wrap items-center justify-between gap-3" data-testid="basic-navigation">
              <nav className="flex rounded-xl border border-border bg-card p-1" aria-label="Basic pages">
                {(['Billing', 'Catalog'] as const).map((section) => <button key={section} type="button" onClick={() => changeSection(section)} aria-current={activeSection === section ? 'page' : undefined} className={`rounded-lg px-4 py-2 text-xs font-extrabold ${activeSection === section ? 'bg-primary text-primary-foreground' : 'text-primary'}`} data-testid={`basic-nav-${section.toLowerCase()}`}>{section}</button>)}
              </nav>
-             <label className="text-xs font-bold text-muted-foreground">Version <select value={appVersion} onChange={(event) => changeVersion(event.target.value as AppVersion)} className="ml-1 rounded-lg border border-border bg-card px-2 py-2 text-primary" data-testid="select-app-version"><option value="basic">Basic</option><option value="full">Full</option></select></label>
+              <span className="rounded-lg border border-border bg-card px-3 py-2 text-xs font-bold text-muted-foreground">{shop.premiumApproved ? 'Premium access' : 'Basic plan'}</span>
            </div>}
            {activeSection === 'Billing' && <BillingCalculator key={sales.length} basic={appVersion === 'basic'} products={filteredProducts} search={search} onSearch={setSearch} bill={bill} subtotal={billSubtotal} gst={billGst} total={billTotal} onAdd={addToBill} onImport={importToBill} onAdjust={adjustBill} onClear={() => { setBill([]); flash('Current bill cleared'); }} onPay={() => setPaymentOpen(true)} />}
+           {appVersion === 'basic' && activeSection === 'Billing' && <BasicPaymentTotals sales={sales} />}
            {appVersion === 'full' && activeSection === 'Billing' && <nav className="mt-20 border-t border-border pt-8" aria-label="More shop sections" data-testid="nav-billing-footer">
             <p className="mb-4 text-xs font-bold uppercase tracking-widest text-muted-foreground">More from your shop</p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -390,10 +386,10 @@ function App() {
             </div>
           </nav>}
            {activeSection === 'Catalog' && <CatalogView catalog={catalog} basic={appVersion === 'basic'} onAdd={() => setProductModal({ open: true })} onScan={() => setScanOpen(true)} onEdit={(product) => setProductModal({ open: true, product })} />}
-           {appVersion === 'full' && activeSection === 'Insights' && <InsightsView sales={sales} catalog={catalog} onOpenBill={setReceiptSale} />}
+            {appVersion === 'full' && activeSection === 'Insights' && <InsightsView sales={sales} catalog={catalog} onOpenBill={setReceiptSale} onCollectCredit={collectCredit} />}
            {appVersion === 'full' && activeSection === 'Notifications' && <NotificationsView lowStock={lowStock} sales={sales} onGoCatalog={() => changeSection('Catalog')} />}
            {appVersion === 'full' && activeSection === 'Broadcast' && <BroadcastView settings={settings} onOpen={() => setBroadcastOpen(true)} />}
-           {appVersion === 'full' && activeSection === 'Settings' && <SettingsView settings={settings} appVersion={appVersion} onVersionChange={changeVersion} onSave={(next) => { setSettings(next); flash('Shop settings saved'); }} />}
+            {appVersion === 'full' && activeSection === 'Settings' && <SettingsView settings={settings} appVersion={appVersion} onSave={(next) => { setSettings(next); flash('Shop settings saved'); }} />}
         </div>
       </main>
 
@@ -406,13 +402,17 @@ function App() {
       {scanOpen && <CatalogScanDialog catalog={catalog} onClose={() => setScanOpen(false)} onRestock={restockFromScan} onCreateDraft={(draft) => { setScanOpen(false); setProductModal({ open: true, draft }); }} onEditDraft={(productId, draft) => { const product = catalog.find((entry) => entry.id === productId); if (!product) return; setScanOpen(false); setProductModal({ open: true, product, draft: { ...draft, id: product.id } }); }} />}
        {productModal.open && <ProductModal basic={appVersion === 'basic'} product={productModal.product} draft={productModal.draft} onClose={() => setProductModal({ open: false })} onSave={saveProduct} onDelete={deleteProduct} />}
        {paymentOpen && (appVersion === 'basic'
-         ? <BasicPaymentModal total={billTotal} onClose={() => setPaymentOpen(false)} onComplete={(method) => completePayment(method, billTotal, 0)} />
+          ? <BasicPaymentModal total={billTotal} onClose={() => setPaymentOpen(false)} onComplete={(method) => completePayment(method, method === 'Credit' ? 0 : billTotal, 0)} />
          : <PaymentModal basic={false} total={billTotal} subtotal={billSubtotal} gst={billGst} lines={bill} settings={settings} onSaveQR={(profile) => setSettings((current) => ({ ...current, paymentQrs: [...current.paymentQrs, profile] }))} onClose={() => setPaymentOpen(false)} onComplete={completePayment} />)}
        {appVersion === 'full' && receiptSale && <ReceiptModal sale={receiptSale} settings={settings} basic={false} onClose={() => setReceiptSale(null)} />}
       {broadcastOpen && <BroadcastModal settings={settings} onClose={() => setBroadcastOpen(false)} onDone={(message) => { setBroadcastOpen(false); flash(message); }} />}
       {toast && <div className="fixed bottom-20 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-2 rounded-xl bg-sidebar px-4 py-3 text-xs font-bold text-sidebar-foreground shadow-[0_12px_35px_rgba(36,31,61,.22)] lg:bottom-7" data-testid="status-toast"><CircleCheck size={16} className="text-sidebar-primary" />{toast}</div>}
     </div>
   );
+}
+
+function App() {
+  return <BuymeAccess><ShopWorkspace /></BuymeAccess>;
 }
 
 function BillingView({ catalog, search, setSearch, category, setCategory, bill, billSubtotal, billGst, billTotal, onAdd, onAdjust, onClear, onPay, onOpenCatalog }: {
@@ -555,14 +555,27 @@ function localDateInput(date: Date) {
 }
 
 function collectedAmount(sale: Sale) {
+  if (Array.isArray(sale.payments)) return roundMoney(sale.payments.reduce((sum, item) => {
+    const amount = Number(item?.amount);
+    return item?.method === 'Cash' || item?.method === 'UPI' ? sum + (Number.isFinite(amount) && amount > 0 ? amount : 0) : sum;
+  }, 0));
   const amount = Number(sale.paid);
-  return Number.isFinite(amount) && amount > 0 ? roundMoney(amount) : 0;
+  return sale.paymentMethod !== 'Credit' && Number.isFinite(amount) && amount > 0 ? roundMoney(amount) : 0;
 }
 
-function InsightsView({ sales, catalog, onOpenBill }: { sales: Sale[]; catalog: Product[]; onOpenBill: (sale: Sale) => void }) {
+function salePayments(sale: Sale): PaymentEntry[] {
+  if (Array.isArray(sale.payments)) return sale.payments
+    .filter((item) => (item?.method === 'Cash' || item?.method === 'UPI') && Number.isFinite(Number(item.amount)) && Number(item.amount) > 0)
+    .map((item) => ({ method: item.method, amount: roundMoney(Number(item.amount)), createdAt: typeof item.createdAt === 'string' ? item.createdAt : sale.createdAt }));
+  return sale.paymentMethod !== 'Credit' && collectedAmount(sale) > 0
+    ? [{ method: sale.paymentMethod, amount: collectedAmount(sale), createdAt: sale.createdAt }]
+    : [];
+}
+
+function InsightsView({ sales, catalog, onOpenBill, onCollectCredit }: { sales: Sale[]; catalog: Product[]; onOpenBill: (sale: Sale) => void; onCollectCredit: (saleId: string, method: 'Cash' | 'UPI', amount: number) => void }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  type Period = 'today' | 'yesterday' | 'last2' | 'last3' | 'custom';
+  type Period = 'today' | 'month' | 'yesterday' | 'last2' | 'last3' | 'custom';
   const latestSaleDate = sales.length ? new Date(Math.max(...sales.map((sale) => new Date(sale.createdAt).getTime()))) : null;
   const [period, setPeriod] = useState<Period>(() => {
     if (!latestSaleDate) return 'today';
@@ -581,10 +594,11 @@ function InsightsView({ sales, catalog, onOpenBill }: { sales: Sale[]; catalog: 
     const date = latestSaleDate ?? today;
     return { from: localDateInput(date), to: localDateInput(date) };
   });
-  const periodLabels: Record<Period, string> = { today: 'Today', yesterday: 'Yesterday', last2: 'Last 2 days', last3: 'Last 3 days', custom: 'Custom dates' };
+  const periodLabels: Record<Period, string> = { today: 'Today', month: 'This month', yesterday: 'Yesterday', last2: 'Last 2 days', last3: 'Last 3 days', custom: 'Custom dates' };
   const validPeriod = period !== 'custom' || (!!customDates.from && !!customDates.to && customDates.from <= customDates.to);
   const rangeStart = period === 'custom' && validPeriod ? new Date(`${customDates.from}T00:00:00`) : new Date(today);
   const rangeEnd = period === 'custom' && validPeriod ? new Date(`${customDates.to}T00:00:00`) : new Date(today);
+  if (period === 'month') rangeStart.setDate(1);
   if (period === 'yesterday') {
     rangeStart.setDate(rangeStart.getDate() - 1);
   } else if (period === 'last2') {
@@ -595,7 +609,7 @@ function InsightsView({ sales, catalog, onOpenBill }: { sales: Sale[]; catalog: 
   if (period !== 'yesterday') rangeEnd.setDate(rangeEnd.getDate() + 1);
   const days: Date[] = [];
   if (validPeriod) {
-    for (let date = new Date(rangeStart); date < rangeEnd && days.length <= 31; date.setDate(date.getDate() + 1)) days.push(new Date(date));
+    for (let date = new Date(rangeStart); date < rangeEnd && days.length < 31; date.setDate(date.getDate() + 1)) days.push(new Date(date));
   }
   const chartAvailable = days.length <= 31;
   const currentSales = validPeriod ? sales.filter((sale) => {
@@ -603,25 +617,31 @@ function InsightsView({ sales, catalog, onOpenBill }: { sales: Sale[]; catalog: 
     return date >= rangeStart.getTime() && date < rangeEnd.getTime();
   }) : [];
   const selectedBills = [...currentSales].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const periodPaymentEvents = validPeriod ? sales.flatMap((sale) => salePayments(sale).map((payment) => ({ sale, payment }))).filter(({ payment }) => {
+    const time = new Date(payment.createdAt).getTime();
+    return time >= rangeStart.getTime() && time < rangeEnd.getTime();
+  }) : [];
+  const creditSales = [...sales].filter((sale) => sale.total - collectedAmount(sale) > 0.005).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const visibleCreditIds = new Set(creditSales.slice(0, 30).map((sale) => sale.id));
   const previousStart = new Date(rangeStart);
   if (chartAvailable) previousStart.setDate(previousStart.getDate() - days.length);
-  const revenue = roundMoney(currentSales.reduce((sum, sale) => sum + collectedAmount(sale), 0));
-  const previousRevenue = chartAvailable && validPeriod ? sales.filter((sale) => {
-    const date = new Date(sale.createdAt).getTime();
+  const revenue = roundMoney(periodPaymentEvents.reduce((sum, event) => sum + event.payment.amount, 0));
+  const previousRevenue = chartAvailable && validPeriod ? sales.flatMap((sale) => salePayments(sale)).filter((payment) => {
+    const date = new Date(payment.createdAt).getTime();
     return date >= previousStart.getTime() && date < rangeStart.getTime();
-  }).reduce((sum, sale) => sum + collectedAmount(sale), 0)
-    : 0;
+  }).reduce((sum, payment) => sum + payment.amount, 0) : 0;
   const dailyRevenue = days.map((date) => {
     const next = new Date(date);
     next.setDate(date.getDate() + 1);
-    return currentSales.filter((sale) => {
-      const time = new Date(sale.createdAt).getTime();
+    return periodPaymentEvents.filter(({ payment }) => {
+      const time = new Date(payment.createdAt).getTime();
       return time >= date.getTime() && time < next.getTime();
-    }).reduce((sum, sale) => sum + collectedAmount(sale), 0);
+    }).reduce((sum, event) => sum + event.payment.amount, 0);
   });
   const maxDailyRevenue = Math.max(0, ...dailyRevenue);
-  const cash = currentSales.filter((sale) => sale.paymentMethod === 'Cash').reduce((sum, sale) => sum + collectedAmount(sale), 0);
-  const upi = currentSales.filter((sale) => sale.paymentMethod === 'UPI').reduce((sum, sale) => sum + collectedAmount(sale), 0);
+  const cash = periodPaymentEvents.filter(({ payment }) => payment.method === 'Cash').reduce((sum, event) => sum + event.payment.amount, 0);
+  const upi = periodPaymentEvents.filter(({ payment }) => payment.method === 'UPI').reduce((sum, event) => sum + event.payment.amount, 0);
+  const creditDue = creditSales.reduce((sum, sale) => sum + Math.max(0, sale.total - collectedAmount(sale)), 0);
   const collected = cash + upi;
   const upiPercent = collected > 0 ? upi / collected * 100 : 0;
   const productTotals = Object.values(currentSales.flatMap((sale) => sale.lines).reduce<Record<string, { name: string; qty: number }>>((acc, line) => {
@@ -633,11 +653,35 @@ function InsightsView({ sales, catalog, onOpenBill }: { sales: Sale[]; catalog: 
   const trackedStock = catalog.flatMap((product) => product.variants.map((variant) => ({ product, variant }))).filter(({ variant }) => typeof variant.stock === 'number');
   const stockValue = trackedStock.reduce((sum, { variant }) => sum + variant.stock! * variant.price, 0);
   const alerts = trackedStock.filter(({ variant }) => variant.stock! <= (variant.threshold ?? 0)).slice(0, 3);
+  const downloadReport = () => {
+    if (!validPeriod) return;
+    const quote = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+    const rows = [
+      ['BUYME report', periodLabels[period], `${localDateInput(rangeStart)} to ${localDateInput(new Date(rangeEnd.getTime() - 86_400_000))}`],
+      [],
+      ['Bills created in selected dates'],
+      ['Bill ID', 'Date', 'Customer', 'Items', 'Total', 'Collected to date', 'Balance due now', 'Payment method'],
+      ...currentSales.map((sale) => {
+        return [sale.id, new Date(sale.createdAt).toLocaleString('en-IN'), sale.customerName || sale.customer || 'Walk-in', sale.lines.map((line) => `${line.name} × ${line.qty}`).join('; '), sale.total.toFixed(2), collectedAmount(sale).toFixed(2), Math.max(0, sale.total - collectedAmount(sale)).toFixed(2), sale.paymentMethod];
+      }),
+      [],
+      ['Payments received in selected dates'],
+      ['Payment date', 'Bill ID', 'Customer', 'Method', 'Amount'],
+      ...periodPaymentEvents.map(({ sale, payment }) => [new Date(payment.createdAt).toLocaleString('en-IN'), sale.id, sale.customerName || sale.customer || 'Walk-in', payment.method, payment.amount.toFixed(2)]),
+    ];
+    const csv = rows.map((row) => row.map(quote).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `buyme-report-${period === 'custom' ? `${customDates.from}-to-${customDates.to}` : localDateInput(rangeStart)}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   return <div className="rise-in">
     <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div><p className="mb-1 text-sm font-semibold text-accent">A little clarity, every day.</p><h2 className="font-display text-[2.35rem] leading-none tracking-tight text-primary">What’s moving.</h2><p className="mt-2 text-sm text-muted-foreground">Sales and saved bills for the selected dates.</p></div>
-      <label className="flex items-center gap-2 self-start rounded-xl border border-border bg-card px-3.5 py-2.5 text-xs font-bold text-muted-foreground"><CalendarDays size={15} /><span className="sr-only">Insights dates</span><select value={period} onChange={(event) => setPeriod(event.target.value as Period)} className="bg-transparent font-bold text-primary outline-none" data-testid="select-insights-period"><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="last2">Last 2 days</option><option value="last3">Last 3 days</option><option value="custom">Custom dates</option></select></label>
+      <div className="flex flex-wrap items-center gap-2 self-start"><label className="flex items-center gap-2 rounded-xl border border-border bg-card px-3.5 py-2.5 text-xs font-bold text-muted-foreground"><CalendarDays size={15} /><span className="sr-only">Insights dates</span><select value={period} onChange={(event) => setPeriod(event.target.value as Period)} className="bg-transparent font-bold text-primary outline-none" data-testid="select-insights-period"><option value="today">Today</option><option value="month">This month</option><option value="yesterday">Yesterday</option><option value="last2">Last 2 days</option><option value="last3">Last 3 days</option><option value="custom">Custom dates</option></select></label><button type="button" onClick={downloadReport} disabled={!validPeriod || (!currentSales.length && !periodPaymentEvents.length)} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-40" data-testid="button-download-insights-report"><Download size={15} /> Download report</button></div>
     </div>
     {period === 'custom' && <div className="mb-5 flex flex-wrap gap-3 rounded-xl border border-border bg-card p-4"><label className="text-xs font-bold">From<input type="date" value={customDates.from} onChange={(event) => setCustomDates((current) => ({ ...current, from: event.target.value }))} className="field mt-1 block" data-testid="input-bills-from" /></label><label className="text-xs font-bold">To<input type="date" value={customDates.to} onChange={(event) => setCustomDates((current) => ({ ...current, to: event.target.value }))} className="field mt-1 block" data-testid="input-bills-to" /></label></div>}
     {!validPeriod && <p role="alert" className="mb-5 text-sm font-bold text-destructive">The start date must be on or before the end date.</p>}
@@ -650,8 +694,16 @@ function InsightsView({ sales, catalog, onOpenBill }: { sales: Sale[]; catalog: 
       <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6">
          <p className="text-xs font-bold text-muted-foreground">Payment mix · {periodLabels[period].toLowerCase()}</p>
         {collected > 0 ? <div className="mt-5 flex items-center gap-5"><div className="relative flex h-28 w-28 shrink-0 items-center justify-center rounded-full" style={{ background: `conic-gradient(hsl(var(--primary)) 0 ${upiPercent}%, hsl(var(--accent)) ${upiPercent}% 100%)` }}><div className="flex h-20 w-20 items-center justify-center rounded-full bg-card text-center"><span className="text-lg font-extrabold">₹</span></div></div><div className="space-y-4 text-xs"><div><div className="flex items-center gap-2 font-bold"><span className="h-2.5 w-2.5 rounded-full bg-primary" /> UPI <span className="ml-2 font-mono-app text-muted-foreground">{money(upi)}</span></div><p className="ml-4 mt-1 text-[10px] text-muted-foreground">{upiPercent.toFixed(1)}% of collected</p></div><div><div className="flex items-center gap-2 font-bold"><span className="h-2.5 w-2.5 rounded-full bg-accent" /> Cash <span className="ml-2 font-mono-app text-muted-foreground">{money(cash)}</span></div><p className="ml-4 mt-1 text-[10px] text-muted-foreground">{(100 - upiPercent).toFixed(1)}% of collected</p></div></div></div> : <p className="mt-5 text-xs text-muted-foreground">No collected payments in this period.</p>}
+        {creditDue > 0 && <p className="mt-4 rounded-xl bg-accent/10 p-3 text-xs font-bold text-accent">All unpaid credit: {money(creditDue)} · collect it below.</p>}
       </section>
     </div>
+    {creditSales.length > 0 && <section className="mt-5 rounded-2xl border border-accent/20 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6" data-testid="section-credit-collection">
+      <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs font-bold text-accent">Credit collection</p><h3 className="mt-1 text-lg font-extrabold">Balances to collect</h3><p className="mt-1 text-xs text-muted-foreground">Record cash or UPI received against a bill; collections appear in Insights on the date received.</p></div><span className="rounded-lg bg-accent/10 px-3 py-2 text-xs font-extrabold text-accent">{creditSales.length} bills · {money(creditDue)}</span></div>
+      <div className="mt-4 max-h-96 divide-y divide-border overflow-y-auto border-t border-border" data-testid="list-credit-collection">
+        {creditSales.slice(0, 30).map((sale) => <div key={sale.id} className="py-3"><div className="flex items-start justify-between gap-3"><button type="button" onClick={() => onOpenBill(sale)} className="min-w-0 text-left hover:text-primary" data-testid={`button-credit-bill-${sale.id}`}><span className="block truncate text-xs font-extrabold">{sale.customerName?.trim() || sale.customer?.trim() || 'Walk-in customer'}</span><span className="mt-0.5 block text-[11px] text-muted-foreground">{sale.id} · {dateLabel(sale.createdAt)}</span></button><span className="shrink-0 text-right"><span className="block text-sm font-extrabold text-accent">{money(Math.max(0, sale.total - collectedAmount(sale)))}</span><span className="text-[10px] text-muted-foreground">due</span></span></div><div className="mt-2"><CollectCreditForm sale={sale} onCollect={onCollectCredit} /></div></div>)}
+        {creditSales.length > 30 && <p className="p-3 text-center text-xs text-muted-foreground">Showing the 30 most recent unpaid bills. To collect from an older bill, select its date range in Saved bills below.</p>}
+      </div>
+    </section>}
     <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]">
        <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6"><div className="flex items-center justify-between"><div><p className="text-xs font-bold text-muted-foreground">Top sellers</p><h3 className="mt-1 text-lg font-extrabold">Customers came for these</h3></div><span className="rounded-lg bg-chart-3/12 px-2 py-1 text-[10px] font-bold text-chart-3">{periodLabels[period]}</span></div><div className="mt-5 space-y-4">{productTotals.length ? productTotals.slice(0, 4).map(({ name, qty }, index) => <div key={`${name}-${index}`} className="flex items-center gap-3"><span className="font-mono-app text-[10px] text-muted-foreground">0{index + 1}</span><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/8 text-[10px] font-extrabold text-primary">{initials(name)}</span><span className="flex-1 text-xs font-bold">{name}</span><span className="text-xs font-extrabold">{qty} sold</span><div className="hidden h-1.5 w-20 overflow-hidden rounded-full bg-muted sm:block"><div className="h-full rounded-full bg-primary" style={{ width: `${qty / productTotals[0].qty * 100}%` }} /></div></div>) : <p className="text-xs text-muted-foreground">No products sold in this period.</p>}</div></section>
       <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6"><div className="flex items-center justify-between gap-2"><div><p className="text-xs font-bold text-muted-foreground">Inventory snapshot</p><h3 className="mt-1 text-lg font-extrabold">Worth keeping an eye on</h3></div><span className="rounded-lg bg-chart-4/20 px-2 py-1 text-[10px] font-bold">{trackedStock.length ? `${money(stockValue)} value` : 'Stock not tracked'}</span></div><div className="mt-5 space-y-3">{alerts.map(({ product, variant }) => <div key={`${product.id}-${variant.id}`} className="flex items-center gap-3 rounded-xl bg-accent/7 p-3"><AlertTriangle size={16} className="text-accent" /><div className="flex-1"><p className="text-xs font-bold">{product.name}</p><p className="mt-0.5 text-[10px] text-muted-foreground">{variant.name} · threshold {variant.threshold ?? 0}</p></div><span className="font-mono-app text-xs font-bold text-accent">{variant.stock} left</span></div>)}{trackedStock.length > 0 && alerts.length === 0 && <div className="rounded-xl bg-chart-3/10 p-4 text-xs font-bold text-chart-3">No urgent stock alerts. Nice work.</div>}{trackedStock.length === 0 && <p className="text-xs text-muted-foreground">Add stock quantities to your catalog to see inventory value and alerts.</p>}</div></section>
@@ -662,13 +714,31 @@ function InsightsView({ sales, catalog, onOpenBill }: { sales: Sale[]; catalog: 
          <span className="text-xs font-bold text-primary">{periodLabels[period]}</span>
       </div>
        {!validPeriod ? <p role="alert" className="mt-4 text-xs font-bold text-destructive">Select a valid date range above.</p> : selectedBills.length ? <div className="mt-4 max-h-96 divide-y divide-border overflow-y-auto border-t border-border" data-testid="list-recent-bills">
-        {selectedBills.map((sale) => <button key={sale.id} type="button" onClick={() => onOpenBill(sale)} className="flex w-full items-start justify-between gap-3 py-3 text-left hover:text-primary" data-testid={`button-recent-bill-${sale.id}`}>
-          <span className="min-w-0"><span className="block truncate text-xs font-extrabold">{sale.customerName?.trim() || sale.customer?.trim() || 'Walk-in customer'}</span><span className="mt-0.5 block text-[11px] text-muted-foreground">{sale.id} · {dateLabel(sale.createdAt)}</span><span className="mt-1 block truncate text-xs text-muted-foreground">{sale.customerName && sale.customer ? `${sale.customer} · ` : ''}{sale.lines.map((line) => line.name).join(', ') || 'Bill'} · {sale.paymentMethod}</span></span>
-          <span className="shrink-0 text-right"><span className="block text-sm font-extrabold">{money(sale.total)}</span><span className="text-[11px] text-muted-foreground">{money(collectedAmount(sale))} collected</span></span>
-        </button>)}
+         {selectedBills.map((sale) => <div key={sale.id}>
+           <button type="button" onClick={() => onOpenBill(sale)} className="flex w-full items-start justify-between gap-3 py-3 text-left hover:text-primary" data-testid={`button-recent-bill-${sale.id}`}>
+             <span className="min-w-0"><span className="block truncate text-xs font-extrabold">{sale.customerName?.trim() || sale.customer?.trim() || 'Walk-in customer'}</span><span className="mt-0.5 block text-[11px] text-muted-foreground">{sale.id} · {dateLabel(sale.createdAt)}</span><span className="mt-1 block truncate text-xs text-muted-foreground">{sale.customerName && sale.customer ? `${sale.customer} · ` : ''}{sale.lines.map((line) => line.name).join(', ') || 'Bill'} · {sale.paymentMethod}</span></span>
+             <span className="shrink-0 text-right"><span className="block text-sm font-extrabold">{money(sale.total)}</span><span className="text-[11px] text-muted-foreground">{money(collectedAmount(sale))} collected</span></span>
+           </button>
+            {sale.total - collectedAmount(sale) > 0.005 && !visibleCreditIds.has(sale.id) && <CollectCreditForm sale={sale} onCollect={onCollectCredit} />}
+         </div>)}
       </div> : <p className="mt-4 rounded-xl bg-muted/50 p-4 text-xs text-muted-foreground" data-testid="status-no-bills-in-range">No saved bills for these dates.</p>}
     </section>
   </div>;
+}
+
+function CollectCreditForm({ sale, onCollect }: { sale: Sale; onCollect: (saleId: string, method: 'Cash' | 'UPI', amount: number) => void }) {
+  const due = Math.max(0, roundMoney(sale.total - collectedAmount(sale)));
+  const [amount, setAmount] = useState(due.toFixed(2));
+  const [method, setMethod] = useState<'Cash' | 'UPI'>('Cash');
+  useEffect(() => setAmount(due.toFixed(2)), [due]);
+  const value = Number(amount);
+  const valid = Number.isFinite(value) && value > 0 && value <= due && roundMoney(value) === value;
+  return <form onSubmit={(event) => { event.preventDefault(); if (valid) onCollect(sale.id, method, value); }} className="mb-3 flex flex-wrap items-end gap-2 rounded-xl bg-accent/7 p-3" data-testid={`form-collect-credit-${sale.id}`}>
+    <p className="mr-auto w-full text-[11px] font-bold text-accent">Credit due: {money(due)}</p>
+    <label className="min-w-28 flex-1 text-[10px] font-bold text-muted-foreground">Amount<input type="number" min="0.01" max={due} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} className="field mt-1" aria-label="Credit amount collected" /></label>
+    <label className="text-[10px] font-bold text-muted-foreground">Method<select value={method} onChange={(event) => setMethod(event.target.value as 'Cash' | 'UPI')} className="field mt-1"><option value="Cash">Cash</option><option value="UPI">UPI</option></select></label>
+    <button type="submit" disabled={!valid} className="rounded-lg bg-primary px-3 py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-40" data-testid={`button-collect-credit-${sale.id}`}>Collect</button>
+  </form>;
 }
 
 function NotificationsView({ lowStock, sales, onGoCatalog }: { lowStock: { product: Product; variant: Variant }[]; sales: Sale[]; onGoCatalog: () => void }) {
@@ -679,14 +749,14 @@ function BroadcastView({ settings, onOpen }: { settings: ShopSettings; onOpen: (
   return <div className="rise-in"><div className="mb-7"><p className="mb-1 text-sm font-semibold text-accent">A friendly tap on the shoulder.</p><h2 className="font-display text-[2.35rem] leading-none tracking-tight text-primary">Broadcast.</h2><p className="mt-2 text-sm text-muted-foreground">Let customers know what’s fresh, useful or worth a visit.</p></div><div className="grid gap-5 lg:grid-cols-[1fr_360px]"><section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-7"><div className="max-w-lg"><span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-chart-3/12 text-chart-3"><MessageCircleMore size={24} /></span><h3 className="mt-6 font-display text-3xl text-primary">Your customers are already listening.</h3><p className="mt-3 text-sm leading-6 text-muted-foreground">Save numbers as you go and send a thoughtful WhatsApp note when new stock arrives, prices change, or festival days are near.</p><button onClick={onOpen} className="mt-6 flex h-11 items-center gap-2 rounded-xl bg-chart-3 px-4 text-xs font-extrabold text-white hover:brightness-105" data-testid="button-start-broadcast"><Send size={16} /> Start a broadcast</button></div></section><section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)]"><p className="text-xs font-bold text-muted-foreground">Your broadcast profile</p><div className="mt-5 flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-full bg-primary/10 text-sm font-extrabold text-primary">{initials(settings.shopName)}</span><div><p className="text-sm font-extrabold">{settings.shopName}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{settings.phone}</p></div></div><div className="mt-6 rounded-xl bg-muted/50 p-3.5 text-xs leading-5 text-muted-foreground">Tip: Keep it personal and useful. A short note about fresh stock works better than a long offer list.</div></section></div></div>;
 }
 
-function SettingsView({ settings, appVersion, onVersionChange, onSave }: { settings: ShopSettings; appVersion: AppVersion; onVersionChange: (version: AppVersion) => void; onSave: (settings: ShopSettings) => void }) {
+function SettingsView({ settings, appVersion, onSave }: { settings: ShopSettings; appVersion: AppVersion; onSave: (settings: ShopSettings) => void }) {
   const [form, setForm] = useState(settings);
   useEffect(() => setForm(settings), [settings]);
   return <div className="rise-in">
     <div className="mb-7"><p className="text-sm font-semibold text-accent">Make it yours.</p><h2 className="font-display text-[2.35rem] leading-none text-primary">Settings.</h2></div>
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
       <section className="rounded-2xl border border-border bg-card p-5 sm:p-7">
-        <div className="border-b border-border pb-5"><h3 className="text-lg font-extrabold">App version</h3><p className="mt-1 text-xs text-muted-foreground">Basic has just Billing and Catalog: select items, show the amount due, and record payment without a bill or PDF. Full keeps all shop tools. Switching does not delete your products or recorded sales.</p><select value={appVersion} onChange={(event) => onVersionChange(event.target.value as AppVersion)} className="field mt-3 max-w-xs" data-testid="select-app-version"><option value="full">Full</option><option value="basic">Basic</option></select></div>
+        <div className="border-b border-border pb-5"><h3 className="text-lg font-extrabold">Plan access</h3><p className="mt-1 text-xs text-muted-foreground">{appVersion === 'full' ? 'Premium access is approved for this shop. Full shop tools are available to everyone on the team.' : 'This shop is on Basic. The BUYME company team can approve Premium access.'}</p><span className="mt-3 inline-flex rounded-full bg-primary/10 px-3 py-1.5 text-xs font-extrabold text-primary">{appVersion === 'full' ? 'Premium' : 'Basic'}</span></div>
         <div className="border-b border-border pb-5"><h3 className="text-lg font-extrabold">Shop details</h3><p className="mt-1 text-xs text-muted-foreground">Shown on bills and receipts.</p><div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Shop name"><input value={form.shopName} onChange={(event) => setForm({ ...form, shopName: event.target.value })} className="field" data-testid="input-shop-name" /></Field><Field label="Phone number"><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} className="field" data-testid="input-shop-phone" /></Field></div></div>
         <div className="border-b border-border py-5"><PaymentQRManager profiles={form.paymentQrs} onChange={(paymentQrs) => setForm((current) => ({ ...current, paymentQrs }))} /></div>
         <div className="border-b border-border py-5">
@@ -696,7 +766,7 @@ function SettingsView({ settings, appVersion, onVersionChange, onSave }: { setti
         <div className="flex flex-col justify-between gap-4 pt-5 sm:flex-row sm:items-center"><div><h3 className="text-sm font-extrabold">Night mode</h3><p className="mt-1 text-xs text-muted-foreground">Easier on the eyes after sunset.</p></div><button onClick={() => setForm({ ...form, darkMode: !form.darkMode })} className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-bold" data-testid="button-toggle-theme">{form.darkMode ? <Moon size={15} /> : <Sun size={15} />} {form.darkMode ? 'Dark' : 'Light'} mode</button></div>
         <button onClick={() => onSave(form)} className="mt-7 flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-xs font-extrabold text-primary-foreground" data-testid="button-save-settings"><Check size={16} /> Save changes</button>
       </section>
-      <aside className="rounded-2xl border border-primary/15 bg-primary p-5 text-primary-foreground"><ShieldCheck size={22} className="text-sidebar-primary" /><h3 className="mt-4 text-lg font-extrabold">Private by default.</h3><p className="mt-2 text-xs leading-5 text-primary-foreground/70">BUYME keeps your catalog, sales and QR choices on this device. Check the recipient shown in a UPI app before you confirm payment.</p></aside>
+      <aside className="rounded-2xl border border-primary/15 bg-primary p-5 text-primary-foreground"><ShieldCheck size={22} className="text-sidebar-primary" /><h3 className="mt-4 text-lg font-extrabold">Private by default.</h3><p className="mt-2 text-xs leading-5 text-primary-foreground/70">Your shop data is saved to your account and shared only with this shop’s invited team. Check the recipient shown in a UPI app before you confirm payment.</p></aside>
     </div>
   </div>;
 }
@@ -735,7 +805,7 @@ function PaymentQRManager({ profiles, onChange }: { profiles: PaymentQR[]; onCha
   const upload = async (file?: File) => {
     if (!file) return;
     setUploading(true);
-    try { const image = await prepareQrImage(file); setDraft((current) => ({ ...current, image })); setError(''); }
+    try { const image = await uploadSellerPhoto(await prepareQrImage(file)); setDraft((current) => ({ ...current, image })); setError(''); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not read this QR image.'); }
     finally { setUploading(false); }
   };
@@ -758,7 +828,7 @@ function PaymentQRManager({ profiles, onChange }: { profiles: PaymentQR[]; onCha
       </div>
       {draft.image && <div className="mt-3 flex items-center gap-3"><img src={draft.image} alt="QR preview" className="h-20 w-20 rounded-lg border border-border object-contain" /><button onClick={() => setDraft({ ...draft, image: undefined })} className="text-xs font-bold text-destructive">Remove image</button></div>}
       {error && <p className="mt-3 text-xs font-bold text-destructive" role="alert">{error}</p>}
-      <div className="mt-4 flex items-center justify-between"><p className="text-[11px] text-muted-foreground">Click Save changes below to keep profile edits on this device.</p><button onClick={saveProfile} disabled={uploading} className="shrink-0 rounded-lg bg-primary px-3 py-2 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-add-qr-profile">{profiles.some((item) => item.id === draft.id) ? 'Update QR' : 'Add QR'}</button></div>
+      <div className="mt-4 flex items-center justify-between"><p className="text-[11px] text-muted-foreground">Click Save changes below to keep profile edits on your shop account.</p><button onClick={saveProfile} disabled={uploading} className="shrink-0 rounded-lg bg-primary px-3 py-2 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-add-qr-profile">{profiles.some((item) => item.id === draft.id) ? 'Update QR' : 'Add QR'}</button></div>
     </div>
   </div>;
 }
@@ -789,7 +859,7 @@ function ProductModal({ basic, product, draft, onClose, onSave, onDelete }: { ba
     if (!file) return;
     setPhotoBusy(true);
     try {
-      const image = await compressProductPhoto(file);
+      const image = await uploadSellerPhoto(await compressProductPhoto(file));
       setForm((current) => ({ ...current, image }));
     } catch (error) {
       window.alert(error instanceof Error ? error.message : 'Could not read this photo.');
@@ -820,7 +890,7 @@ function ProductModal({ basic, product, draft, onClose, onSave, onDelete }: { ba
       <div>
         <div className="mb-2 flex items-center justify-between"><span className="text-xs font-bold text-muted-foreground">Sizes & prices</span><button onClick={() => setForm({ ...form, variants: [...form.variants, { id: crypto.randomUUID(), name: '', price: 0, stock: undefined, threshold: undefined, unit: 'piece' }] })} className="flex items-center gap-1 text-xs font-bold text-primary" data-testid="button-add-variant"><Plus size={14} /> Add size</button></div>
         <div className="space-y-2">{form.variants.map((variant, index) => <div key={variant.id} className="rounded-xl border border-border bg-background p-3">
-          <label className="mb-2 flex cursor-pointer items-center gap-2 text-xs font-bold text-primary">{variant.image && <img src={variant.image} alt="" className="h-10 w-10 rounded-lg object-cover" />}{variant.image ? 'Change type photo' : 'Add type photo (optional)'}<input type="file" accept="image/*" className="sr-only" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; try { const image = await compressProductPhoto(file); updateVariant(variant.id, { image }); } catch (cause) { window.alert(cause instanceof Error ? cause.message : 'Could not read this photo.'); } }} data-testid={`input-variant-photo-${index}`} /></label>
+          <label className="mb-2 flex cursor-pointer items-center gap-2 text-xs font-bold text-primary">{variant.image && <img src={variant.image} alt="" className="h-10 w-10 rounded-lg object-cover" />}{variant.image ? 'Change type photo' : 'Add type photo (optional)'}<input type="file" accept="image/*" className="sr-only" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; try { const image = await uploadSellerPhoto(await compressProductPhoto(file)); updateVariant(variant.id, { image }); } catch (cause) { window.alert(cause instanceof Error ? cause.message : 'Could not read this photo.'); } }} data-testid={`input-variant-photo-${index}`} /></label>
           <div className="grid grid-cols-[1fr_86px] gap-2"><input value={variant.name} onChange={(event) => updateVariant(variant.id, { name: event.target.value })} placeholder="Size" className="field" data-testid={`input-variant-name-${index}`} /><input type="number" min={0} value={variant.price} onChange={(event) => updateVariant(variant.id, { price: Number(event.target.value) })} placeholder="₹ Price" className="field" data-testid={`input-variant-price-${index}`} /></div>
           <div className="mt-2 grid grid-cols-3 gap-2"><input value={variant.unit} onChange={(event) => updateVariant(variant.id, { unit: event.target.value })} placeholder="Unit" className="field" data-testid={`input-variant-unit-${index}`} /><input type="number" min={0} value={variant.stock ?? ''} onChange={(event) => updateVariant(variant.id, { stock: event.target.value === '' ? undefined : Math.max(0, Number(event.target.value)) })} placeholder="Stock" className="field" data-testid={`input-variant-stock-${index}`} /><input type="number" min={0} value={variant.threshold ?? ''} onChange={(event) => updateVariant(variant.id, { threshold: event.target.value === '' ? undefined : Math.max(0, Number(event.target.value)) })} placeholder="Alert at" className="field" data-testid={`input-variant-threshold-${index}`} /></div>
           {form.variants.length > 1 && <button onClick={() => setForm({ ...form, variants: form.variants.filter((item) => item.id !== variant.id) })} className="mt-2 text-[11px] font-bold text-destructive">Remove size</button>}
@@ -865,22 +935,39 @@ function BasicPaymentModal({ total, onClose, onComplete }: {
   total: number; onClose: () => void; onComplete: (method: PaymentMethod) => void;
 }) {
   const [method, setMethod] = useState<PaymentMethod>('UPI');
+  const methods: { value: PaymentMethod; label: string; icon: typeof Smartphone }[] = [
+    { value: 'UPI', label: 'UPI', icon: Smartphone },
+    { value: 'Cash', label: 'Cash', icon: Banknote },
+    { value: 'Credit', label: 'Credit', icon: ReceiptIndianRupee },
+  ];
   return <Modal title="Payment" onClose={onClose}>
     <div className="rounded-xl bg-primary p-6 text-primary-foreground">
       <p className="text-xs font-bold uppercase tracking-widest opacity-75">Tell the customer · amount due</p>
       <p className="mt-2 text-5xl font-extrabold tabular-nums" data-testid="basic-amount-due">{money(total)}</p>
     </div>
     <p className="mb-3 mt-6 text-sm font-bold">How did the customer pay?</p>
-    <div className="grid grid-cols-2 gap-3">
-      <button type="button" onClick={() => setMethod('UPI')} aria-pressed={method === 'UPI'} className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-sm font-extrabold ${method === 'UPI' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`} data-testid="button-payment-upi"><Smartphone size={17} /> UPI</button>
-      <button type="button" onClick={() => setMethod('Cash')} aria-pressed={method === 'Cash'} className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-sm font-extrabold ${method === 'Cash' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`} data-testid="button-payment-cash"><Banknote size={17} /> Cash</button>
+    <div className="grid grid-cols-3 gap-2">
+      {methods.map(({ value, label, icon: Icon }) => <button key={value} type="button" onClick={() => setMethod(value)} aria-pressed={method === value} className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-xs font-extrabold ${method === value ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`} data-testid={`button-payment-${value.toLowerCase()}`}><Icon size={16} /> {label}</button>)}
     </div>
-    <p className="mt-4 text-xs leading-5 text-muted-foreground" data-testid="basic-payment-note">{method === 'UPI' ? 'Use the QR already displayed in your shop. Confirm payment in your UPI app before marking it received.' : 'Confirm you have received the cash before marking it received.'}</p>
+    <p className="mt-4 text-xs leading-5 text-muted-foreground" data-testid="basic-payment-note">{method === 'UPI' ? 'Use the QR already displayed in your shop. Confirm payment in your UPI app before marking it received.' : method === 'Cash' ? 'Confirm you have received the cash before marking it received.' : 'Record this bill as credit. The full amount remains due; collect it later and track it in Full Insights.'}</p>
     <div className="mt-6 flex justify-end gap-2 border-t border-border pt-4">
       <button type="button" onClick={onClose} className="rounded-xl px-4 py-3 text-sm font-bold text-muted-foreground">Back</button>
-      <button type="button" onClick={() => onComplete(method)} className="rounded-xl bg-primary px-5 py-3 text-sm font-extrabold text-primary-foreground" data-testid="button-confirm-payment">Mark {money(total)} received</button>
+      <button type="button" onClick={() => onComplete(method)} className="rounded-xl bg-primary px-5 py-3 text-sm font-extrabold text-primary-foreground" data-testid="button-confirm-payment">{method === 'Credit' ? 'Record credit' : `Mark ${money(total)} received`}</button>
     </div>
   </Modal>;
+}
+
+function BasicPaymentTotals({ sales }: { sales: Sale[] }) {
+  const today = localDateInput(new Date());
+  const todaysSales = sales.filter((sale) => localDateInput(new Date(sale.createdAt)) === today);
+  const todaysPayments = sales.flatMap(salePayments).filter((entry) => localDateInput(new Date(entry.createdAt)) === today);
+  const cash = todaysPayments.filter((entry) => entry.method === 'Cash').reduce((sum, entry) => sum + entry.amount, 0);
+  const upi = todaysPayments.filter((entry) => entry.method === 'UPI').reduce((sum, entry) => sum + entry.amount, 0);
+  const credit = sales.reduce((sum, sale) => sum + Math.max(0, sale.total - collectedAmount(sale)), 0);
+  return <section className="mt-5 rounded-2xl border border-border bg-card p-5" aria-label="Today’s payment totals" data-testid="basic-payment-totals">
+    <div className="flex items-center justify-between"><div><h3 className="font-extrabold">Today’s payment totals</h3><p className="mt-1 text-xs text-muted-foreground">Summary only in Basic; full bill history is available in Full.</p></div><span className="text-[10px] font-bold text-muted-foreground">{todaysSales.length} bills</span></div>
+    <div className="mt-4 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-muted/40 p-3"><p className="text-[10px] font-bold text-muted-foreground">UPI today</p><p className="mt-1 text-sm font-extrabold">{money(upi)}</p></div><div className="rounded-xl bg-muted/40 p-3"><p className="text-[10px] font-bold text-muted-foreground">Cash today</p><p className="mt-1 text-sm font-extrabold">{money(cash)}</p></div><div className="rounded-xl bg-accent/10 p-3"><p className="text-[10px] font-bold text-accent">Credit due now</p><p className="mt-1 text-sm font-extrabold">{money(credit)}</p></div></div>
+  </section>;
 }
 
 function PaymentModal({ basic, total, subtotal, gst, lines, settings, onSaveQR, onClose, onComplete }: {
@@ -909,10 +996,10 @@ function PaymentModal({ basic, total, subtotal, gst, lines, settings, onSaveQR, 
   const [newQRError, setNewQRError] = useState('');
   const [uploading, setUploading] = useState(false);
   const enteredPaid = Number(paid);
-  const validPaid = paid.trim() !== '' && Number.isFinite(enteredPaid) && enteredPaid >= 0
+  const validPaid = method === 'Credit' || (paid.trim() !== '' && Number.isFinite(enteredPaid) && enteredPaid >= 0
     && enteredPaid <= finalTotal && (enteredPaid > 0 || finalTotal === 0)
-    && roundMoney(enteredPaid) === enteredPaid;
-  const paidValue = validPaid ? enteredPaid : 0;
+    && roundMoney(enteredPaid) === enteredPaid);
+  const paidValue = method === 'Credit' ? 0 : validPaid ? enteredPaid : 0;
   const chosen = settings.paymentQrs.find((profile) => profile.id === selectedId) ?? settings.paymentQrs[0];
   const paymentProfile = useMemo(() => ({
     ...settings,
@@ -974,13 +1061,13 @@ function PaymentModal({ basic, total, subtotal, gst, lines, settings, onSaveQR, 
         <div className="mt-3 max-h-56 space-y-2 overflow-auto rounded-xl border border-border p-4">{lines.map((line) => <div key={line.lineId} className="flex justify-between gap-2 text-sm"><span>{line.name} · {line.variant} × {line.qty} {line.unit}</span><strong>{money(roundMoney(line.price * line.qty))}</strong></div>)}</div>
         <div className="mt-4 rounded-xl border border-border bg-card p-4"><p className="mb-3 text-xs font-extrabold">Customer on this bill · edit before saving</p><CustomerFields name={customerName} number={customer} onNameChange={setCustomerName} onNumberChange={setCustomer} /></div>
         <p className="mb-2 mt-5 text-xs font-bold">Payment method</p>
-        <div className="grid grid-cols-2 gap-2"><button onClick={() => setMethod('UPI')} className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-sm font-extrabold ${method === 'UPI' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`} data-testid="button-payment-upi"><Smartphone size={17} /> UPI / QR</button><button onClick={() => setMethod('Cash')} className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-sm font-extrabold ${method === 'Cash' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`} data-testid="button-payment-cash"><Banknote size={17} /> Cash</button></div>
-        <div className="mt-4 max-w-xs"><Field label="Amount received"><div className="relative"><IndianRupee size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input type="number" min="0" max={finalTotal} step="0.01" value={paid} onChange={(event) => setPaid(event.target.value)} className="field pl-8" data-testid="input-payment-amount" /></div></Field></div>
+         <div className="grid grid-cols-3 gap-2"><button onClick={() => { setMethod('UPI'); if (method === 'Credit') setPaid(String(finalTotal)); }} className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-xs font-extrabold ${method === 'UPI' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`} data-testid="button-payment-upi"><Smartphone size={16} /> UPI / QR</button><button onClick={() => { setMethod('Cash'); if (method === 'Credit') setPaid(String(finalTotal)); }} className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-xs font-extrabold ${method === 'Cash' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`} data-testid="button-payment-cash"><Banknote size={16} /> Cash</button><button onClick={() => { setMethod('Credit'); setPaid('0'); }} className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-xs font-extrabold ${method === 'Credit' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`} data-testid="button-payment-credit"><ReceiptIndianRupee size={16} /> Credit</button></div>
+         {method === 'Credit' ? <p className="mt-4 rounded-xl bg-accent/10 p-3 text-xs text-accent">No payment is collected now. {money(finalTotal)} will remain due and can be collected from Insights.</p> : <div className="mt-4 max-w-xs"><Field label="Amount received"><div className="relative"><IndianRupee size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input type="number" min="0" max={finalTotal} step="0.01" value={paid} onChange={(event) => setPaid(event.target.value)} className="field pl-8" data-testid="input-payment-amount" /></div></Field></div>}
         {!validPaid && <p role="alert" className="mt-2 text-xs font-bold text-destructive">Enter an amount from ₹{finalTotal === 0 ? '0' : '0.01'} to {money(finalTotal)} with at most two decimal places.</p>}
         {paidValue < finalTotal && <p className="mt-2 text-xs font-bold text-accent">{money(roundMoney(finalTotal - paidValue))} will remain due after saving.</p>}
-         {method === 'UPI' && !basic && <>
+        {method === 'UPI' && !basic && <>
            <div className="mb-2 mt-5 flex items-center justify-between"><p className="text-xs font-extrabold">Receiving account · change QR here</p><button onClick={() => setAddingQR((current) => !current)} className="text-xs font-bold text-primary" data-testid="button-add-qr-checkout">{addingQR ? 'Cancel' : '+ Add QR now'}</button></div>
-          <div className="flex flex-wrap gap-2">{settings.paymentQrs.map((profile) => <button key={profile.id} onClick={() => setSelectedId(profile.id)} aria-pressed={chosen?.id === profile.id} className={`rounded-xl border px-3 py-2 text-xs font-bold ${chosen?.id === profile.id ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card'}`} data-testid={`button-select-qr-${profile.id}`}>{profile.label}</button>)}</div>
+           <div className="no-scrollbar flex max-w-full snap-x gap-2 overflow-x-auto overscroll-x-contain pb-2" aria-label="Swipe to choose a receiving QR">{settings.paymentQrs.map((profile) => <button key={profile.id} onClick={() => setSelectedId(profile.id)} aria-pressed={chosen?.id === profile.id} className={`shrink-0 snap-start rounded-xl border px-3 py-2 text-xs font-bold ${chosen?.id === profile.id ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card'}`} data-testid={`button-select-qr-${profile.id}`}>{profile.label}</button>)}</div>
           {addingQR && <div className="mt-3 space-y-3 rounded-xl border border-primary/20 bg-background p-3">
             <div className="grid gap-2 sm:grid-cols-2"><Field label="QR name"><input value={newQR.label} onChange={(event) => setNewQR({ ...newQR, label: event.target.value })} className="field" placeholder="Shop / Personal" data-testid="input-checkout-qr-label" /></Field><Field label="UPI ID or upload image"><input value={newQR.upiId} onChange={(event) => setNewQR({ ...newQR, upiId: event.target.value })} className="field" placeholder="yourname@bank" data-testid="input-checkout-upi-id" /></Field><Field label="Recipient name"><input value={newQR.upiName} onChange={(event) => setNewQR({ ...newQR, upiName: event.target.value })} className="field" placeholder="Name on UPI apps" data-testid="input-checkout-upi-name" /></Field><label className="flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-primary/40 px-3 py-2 text-xs font-bold text-primary">{uploading ? 'Preparing...' : newQR.image ? 'QR image attached' : 'Upload fixed QR'}<input type="file" accept="image/*" onChange={(event) => uploadQR(event.target.files?.[0])} className="sr-only" data-testid="input-checkout-qr-image" /></label></div>
             {newQRError && <p role="alert" className="text-xs font-bold text-destructive">{newQRError}</p>}
@@ -988,14 +1075,14 @@ function PaymentModal({ basic, total, subtotal, gst, lines, settings, onSaveQR, 
           </div>}
         </>}
       </div>
-       {basic ? <p className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground" data-testid="basic-payment-note">{method === 'UPI' ? 'Ask the customer to pay using the QR already displayed in your shop. Confirm the payment in your UPI app before saving this bill. BUYME does not display or collect a QR in Basic.' : 'Confirm the cash received before saving this bill.'}</p> : <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-background p-4 text-center">
-         {method === 'Cash' ? <><Banknote size={48} className="text-primary" /><h3 className="mt-4 text-base font-extrabold">{finalTotal === 0 ? 'No payment due' : 'Cash payment'}</h3></> : qrError ? <p className="text-sm font-bold text-destructive">Could not generate this QR. Choose another account.</p> : qrData ? <><img src={qrData} alt={`${chosen?.label || 'UPI'} QR for ${money(paidValue)}`} className="size-64 rounded-xl bg-white p-2 object-contain sm:size-72" data-testid="image-payment-qr" /><p className="mt-3 text-lg font-extrabold">{upiUri ? `Scan to pay ${money(paidValue)}` : `Scan QR · enter ${money(paidValue)}`}</p><p className="mt-1 break-all text-xs text-muted-foreground">{chosen?.label} {chosen?.upiId && `· ${chosen.upiId}`}</p>{!upiUri && <p className="mt-2 text-[11px] leading-4 text-accent">Fixed QR: confirm recipient and amount in the UPI app. This image is not automatically linked to a UPI ID.</p>}</> : upiUri ? <p className="text-sm text-muted-foreground">Generating QR...</p> : <><Smartphone size={40} className="text-primary" /><h3 className="mt-3 text-sm font-extrabold">Add a receiving account</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">Add a UPI ID or upload a fixed QR above, then select it here.</p></>}
+        {basic ? <p className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground" data-testid="basic-payment-note">{method === 'UPI' ? 'Ask the customer to pay using the QR already displayed in your shop. Confirm the payment in your UPI app before saving this bill. BUYME does not display or collect a QR in Basic.' : method === 'Credit' ? 'This records the full amount as credit due.' : 'Confirm the cash received before saving this bill.'}</p> : <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-background p-4 text-center">
+          {method === 'Credit' ? <><ReceiptIndianRupee size={48} className="text-accent" /><h3 className="mt-4 text-base font-extrabold">Credit sale</h3><p className="mt-2 text-sm text-muted-foreground">{money(finalTotal)} remains to collect.</p></> : method === 'Cash' ? <><Banknote size={48} className="text-primary" /><h3 className="mt-4 text-base font-extrabold">{finalTotal === 0 ? 'No payment due' : 'Cash payment'}</h3></> : qrError ? <p className="text-sm font-bold text-destructive">Could not generate this QR. Choose another account.</p> : qrData ? <><img src={qrData} alt={`${chosen?.label || 'UPI'} QR for ${money(paidValue)}`} className="size-64 rounded-xl bg-white p-2 object-contain sm:size-72" data-testid="image-payment-qr" /><p className="mt-3 text-lg font-extrabold">{upiUri ? `Scan to pay ${money(paidValue)}` : `Scan QR · enter ${money(paidValue)}`}</p><p className="mt-1 break-all text-xs text-muted-foreground">{chosen?.label} {chosen?.upiId && `· ${chosen.upiId}`}</p>{!upiUri && <p className="mt-2 text-[11px] leading-4 text-accent">Fixed QR: confirm recipient and amount in the UPI app. This image is not automatically linked to a UPI ID.</p>}</> : upiUri ? <p className="text-sm text-muted-foreground">Generating QR...</p> : <><Smartphone size={40} className="text-primary" /><h3 className="mt-3 text-sm font-extrabold">Add a receiving account</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">Add a UPI ID or upload a fixed QR above, then select it here.</p></>}
       </div>}
     </div>
     <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-border pt-4">
       <button onClick={onClose} className="rounded-xl px-4 py-2.5 text-xs font-bold text-muted-foreground" data-testid="button-cancel-payment">Back</button>
        {pdf.url ? <><a href={pdf.url} download="bill-draft.pdf" className="flex items-center gap-2 rounded-xl border border-primary px-4 py-2.5 text-xs font-extrabold text-primary" data-testid="button-download-bill-pdf"><Download size={15} /> Download bill PDF</a><a href={pdf.url} target="_blank" rel="noopener noreferrer" className="flex items-center rounded-xl px-3 py-2.5 text-xs font-bold text-primary" data-testid="link-open-bill-pdf">Open PDF</a></> : <span className={`flex items-center rounded-xl border border-border px-4 py-2.5 text-xs font-bold ${pdf.failed ? 'text-destructive' : 'text-muted-foreground'}`}>{!validPaid ? 'Enter a valid amount for the PDF' : pdf.failed ? 'Could not prepare PDF' : 'Preparing PDF...'}</span>}
-        <button onClick={() => onComplete(method, paidValue, discount, customerNameValue || undefined, customerNumberValue || undefined, basic ? undefined : chosen)} disabled={!validPaid || !pdf.url || (!basic && method === 'UPI' && (!qrData || qrError))} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40" data-testid="button-confirm-payment"><Check size={15} /> {finalTotal === 0 ? 'Save bill' : 'Save payment'}</button>
+        <button onClick={() => onComplete(method, paidValue, discount, customerNameValue || undefined, customerNumberValue || undefined, basic ? undefined : chosen)} disabled={!validPaid || !pdf.url || (!basic && method === 'UPI' && (!qrData || qrError))} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40" data-testid="button-confirm-payment"><Check size={15} /> {method === 'Credit' ? 'Save as credit' : finalTotal === 0 ? 'Save bill' : 'Save payment'}</button>
     </div>
     </>}
   </Modal>;
@@ -1004,14 +1091,17 @@ function PaymentModal({ basic, total, subtotal, gst, lines, settings, onSaveQR, 
 function ReceiptModal({ sale, settings, basic, onClose }: { sale: Sale; settings: ShopSettings; basic: boolean; onClose: () => void }) {
   const subtotal = sale.subtotal ?? sale.lines.reduce((sum, line) => sum + line.price * line.qty, 0);
   const gst = sale.gst ?? Math.max(0, sale.total + (sale.discount ?? 0) - subtotal);
+  const payments = salePayments(sale);
+  const collected = collectedAmount(sale);
+  const balance = Math.max(0, roundMoney(sale.total - collected));
   const receiptProfile = useMemo(() => ({ ...settings, upiId: basic ? '' : sale.paymentQr?.upiId ?? '', upiName: sale.paymentQr?.upiName ?? '', qrImage: basic ? undefined : sale.paymentQr?.image, omitPaymentQr: basic }), [settings, sale.paymentQr, basic]);
   const pdf = usePdfDownload(sale, receiptProfile, 'receipt');
   return <Modal title="Bill saved" onClose={onClose}>
     <div className="receipt-paper print-receipt rounded-xl border border-border p-5">
       <div className="text-center"><div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-lg font-extrabold text-primary-foreground">B</div><h3 className="mt-3 text-lg font-extrabold">{settings.shopName}</h3><p className="text-[10px] text-slate-500">{settings.phone}</p><p className="mt-3 border-y border-dashed border-slate-300 py-2 font-mono text-[10px] text-slate-500">{sale.id} · {dateLabel(sale.createdAt)}</p></div>
       {(sale.customerName || sale.customer) && <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700" data-testid="receipt-customer"><p className="font-bold">Customer: {sale.customerName || 'Walk-in'}</p>{sale.customer && <p className="mt-0.5">Phone: {sale.customer}</p>}</div>}
-      <div className="mt-4 space-y-2">{sale.lines.map((line) => <div key={line.lineId} className="flex justify-between gap-3 text-xs"><span>{line.name} ({line.variant}) <small className="text-slate-500">× {line.qty}</small></span><span className="font-mono">{money(line.price * line.qty)}</span></div>)}</div>
-      <div className="mt-4 space-y-1 border-t border-slate-300 pt-3"><div className="flex justify-between text-xs"><span>Subtotal</span><span>{money(subtotal)}</span></div>{gst > 0 && <div className="flex justify-between text-xs"><span>GST</span><span>{money(gst)}</span></div>}{!!sale.discount && <div className="flex justify-between text-xs"><span>Discount</span><span>−{money(sale.discount)}</span></div>}<div className="flex justify-between text-sm font-extrabold"><span>Total</span><span>{money(sale.total)}</span></div><div className="flex justify-between text-[10px] text-slate-500"><span>{sale.paymentMethod} received</span><span>{money(sale.paid)}</span></div>{sale.paid < sale.total && <div className="flex justify-between text-[10px] font-bold text-slate-600"><span>Balance due</span><span>{money(roundMoney(sale.total - sale.paid))}</span></div>}</div>
+       <div className="mt-4 space-y-2">{sale.lines.map((line) => <div key={line.lineId} className="flex justify-between gap-3 text-xs"><span>{line.name} ({line.variant}) <small className="text-slate-500">× {line.qty}</small></span><span className="font-mono">{money(line.price * line.qty)}</span></div>)}</div>
+       <div className="mt-4 space-y-1 border-t border-slate-300 pt-3"><div className="flex justify-between text-xs"><span>Subtotal</span><span>{money(subtotal)}</span></div>{gst > 0 && <div className="flex justify-between text-xs"><span>GST</span><span>{money(gst)}</span></div>}{!!sale.discount && <div className="flex justify-between text-xs"><span>Discount</span><span>−{money(sale.discount)}</span></div>}<div className="flex justify-between text-sm font-extrabold"><span>Total</span><span>{money(sale.total)}</span></div>{payments.length ? payments.map((payment, index) => <div key={`${payment.createdAt}-${index}`} className="flex justify-between text-[10px] text-slate-500"><span>{payment.method} received</span><span>{money(payment.amount)}</span></div>) : <div className="flex justify-between text-[10px] text-slate-500"><span>{sale.paymentMethod === 'Credit' ? 'Payment status' : `${sale.paymentMethod} received`}</span><span>{sale.paymentMethod === 'Credit' ? 'Credit sale' : money(0)}</span></div>}{balance > 0 && <div className="flex justify-between text-[10px] font-bold text-slate-600"><span>Balance due</span><span>{money(balance)}</span></div>}</div>
     </div>
     <div className="mt-5 flex gap-2"><button onClick={() => window.print()} className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-border py-2.5 text-xs font-bold" data-testid="button-print-receipt"><Printer size={15} /> Print</button>{pdf.url ? <a href={pdf.url} download={`receipt-${sale.id}.pdf`} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-download-receipt"><Download size={15} /> Download PDF</a> : <span className={`flex flex-1 items-center justify-center rounded-xl px-3 text-xs font-bold ${pdf.failed ? 'text-destructive' : 'text-muted-foreground'}`}>{pdf.failed ? 'Could not prepare PDF' : 'Preparing PDF...'}</span>}</div>
     {pdf.url && <p className="mt-3 text-center text-xs text-muted-foreground">Download blocked? <a href={pdf.url} target="_blank" rel="noopener noreferrer" className="font-bold text-primary underline" data-testid="link-open-receipt-pdf">Open the PDF</a> to save it from your browser.</p>}
@@ -1020,13 +1110,38 @@ function ReceiptModal({ sale, settings, basic, onClose }: { sale: Sale; settings
 
 function BroadcastModal({ settings, onClose, onDone }: { settings: ShopSettings; onClose: () => void; onDone: (message: string) => void }) {
   const [number, setNumber] = useState('');
-  const [message, setMessage] = useState(`Hello from ${settings.shopName}! Fresh stock is in today. Drop by when you're nearby.`);
+  const [customerName, setCustomerName] = useState('');
+  const [message, setMessage] = useState("Fresh stock is in today. Drop by when you're nearby.");
+  const [image, setImage] = useState<File | null>(null);
+  const [imageUrl, setImageUrl] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!image) { setImageUrl(''); return; }
+    const url = URL.createObjectURL(image);
+    setImageUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [image]);
+  const digits = number.replace(/\D/g, '');
+  const finalMessage = `Hi ${customerName.trim() || 'there'},\n${message.trim()}\n\n${settings.shopName}${settings.phone.trim() ? `\nCall us: ${settings.phone.trim()}` : ''}`;
   const send = () => {
-    if (!number.trim()) return;
-    window.open(`https://wa.me/${number.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
-    onDone('WhatsApp message prepared');
+    if (digits.length < 8 || digits.length > 15 || !message.trim()) return;
+    setError('');
+    window.open(`https://wa.me/${digits}?text=${encodeURIComponent(finalMessage)}`, '_blank', 'noopener,noreferrer');
+    onDone(image ? 'WhatsApp message prepared. Attach the downloaded image before sending.' : 'WhatsApp message prepared. Review and confirm Send there.');
   };
-  return <Modal title="Start a broadcast" onClose={onClose}><div className="space-y-4"><div className="rounded-xl bg-chart-3/10 p-3 text-xs leading-5 text-chart-3"><MessageCircleMore className="mb-1" size={16} /> WhatsApp will open with your message ready. BUYME never sends it without you.</div><Field label="Customer phone number"><div className="relative"><Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input autoFocus value={number} onChange={(e) => setNumber(e.target.value)} placeholder="+91 98765 43210" className="field pl-8" data-testid="input-broadcast-number" /></div></Field><Field label="Message"><textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={5} className="field resize-none leading-5" data-testid="input-broadcast-message" /></Field><button onClick={send} disabled={!number.trim()} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-chart-3 text-xs font-extrabold text-white disabled:opacity-40" data-testid="button-send-broadcast"><Send size={16} /> Open WhatsApp</button></div></Modal>;
+  return <Modal title="Start a broadcast" onClose={onClose}><div className="space-y-4">
+    <div className="rounded-xl bg-chart-3/10 p-3 text-xs leading-5 text-chart-3"><MessageCircleMore className="mb-1" size={16} /> BUYME prepares the message only. Review it in WhatsApp and press Send yourself. Your shop name and phone are included.</div>
+    <Field label="Customer phone number"><div className="relative"><Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input autoFocus type="tel" inputMode="tel" value={number} onChange={(event) => setNumber(event.target.value)} placeholder="+91 98765 43210" className="field pl-8" data-testid="input-broadcast-number" /></div></Field>
+    <Field label="Customer name (optional)"><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} maxLength={80} placeholder="Name for a personal greeting" className="field" data-testid="input-broadcast-customer-name" /></Field>
+    <Field label="Message"><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={4} maxLength={2000} className="field resize-none leading-5" data-testid="input-broadcast-message" /></Field>
+    <div className="rounded-xl border border-border p-3">
+      <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-primary/40 px-3 py-3 text-xs font-bold text-primary"><ImagePlus size={16} /> {image ? 'Change broadcast image' : 'Add an image'}<input type="file" accept="image/*" className="sr-only" data-testid="input-broadcast-image" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; if (file.size > 6_000_000) { setError('Choose an image under 6 MB.'); return; } setError(''); setImage(file); }} /></label>
+      {image && <div className="mt-3 flex items-center gap-3"><img src={imageUrl} alt="Broadcast attachment preview" className="size-16 rounded-lg object-cover" /><span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{image.name}</span><button type="button" onClick={() => setImage(null)} className="text-xs font-bold text-destructive">Remove</button>{imageUrl && <a href={imageUrl} download={image.name || 'buyme-broadcast-image'} className="text-xs font-bold text-primary">Download</a>}</div>}
+      {image && <p className="mt-2 text-[10px] leading-4 text-muted-foreground">Download the image, open the selected WhatsApp chat, then attach the image and confirm Send. BUYME does not send it for you.</p>}
+    </div>
+    {error && <p role="alert" className="text-xs font-bold text-destructive">{error}</p>}
+    <button type="button" onClick={send} disabled={digits.length < 8 || digits.length > 15 || !message.trim()} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-chart-3 text-xs font-extrabold text-white disabled:opacity-40" data-testid="button-send-broadcast"><Send size={16} /> Open selected WhatsApp chat</button>
+  </div></Modal>;
 }
 
 function Modal({ title, onClose, children, wide, large }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; large?: boolean }) {
