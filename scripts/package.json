@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "hello": "tsx ./src/hello.ts",
+    "recovery": "tsx ../lib/db/src/recovery/cli.ts",
+    "test:recovery": "tsx --test ../lib/db/src/recovery/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

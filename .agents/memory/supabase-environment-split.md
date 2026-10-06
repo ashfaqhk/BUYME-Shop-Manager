@@ -8,3 +8,9 @@ Development and production should use one shared Supabase database, as the user 
 **Why:** The user selected a shared database and authorized the migration. Production access was subsequently restored; its public schema contained only the global scan-budget record, not shop tables. Mixing database targets would create divergent data.
 
 **How to apply:** Use the securely configured Supabase connection in both app environments, retaining Replit DATABASE_URL only for tests. Preserve newer scan-budget periods and never reduce same-period usage when retrying imports. App Storage files remain in Replit; moving their database metadata does not move the bytes.
+
+Recovery was designed without a separately verified cutover ancestor snapshot; do not assume the retained database is an authoritative baseline for classifying deletions or choosing the winning branch.
+
+**Why:** No trusted three-way comparison baseline was established during cutover, so automatic timestamp-based reconciliation would risk discarding legitimate shop changes.
+
+**How to apply:** Require explicit operator choices for differing or missing records unless a future recovery establishes and verifies an actual common-ancestor snapshot first.
