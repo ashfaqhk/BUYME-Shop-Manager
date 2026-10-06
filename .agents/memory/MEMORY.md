@@ -7,3 +7,4 @@
 - [AI scan spending protection](ai-scan-spending-protection.md) — Keep billable scan attempts under a shared persistent budget until owner identity can be established.
 - [Basic and Full versions](app-versions.md) — Basic is a simplified interface over the same shop data; switching versions must not discard products or bills.
 - [Shared Supabase database](supabase-environment-split.md) — Development and production share Supabase; Replit source databases are retained for recovery.
+- [Device data and online access](offline-and-access-policy.md) — Device-first saves, Supabase copies, recent PDF reports and email-based company-admin approval must work together.

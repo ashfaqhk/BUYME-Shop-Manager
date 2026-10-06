@@ -22,9 +22,16 @@ import type {
 import type {
   BillListDocument,
   BillListItems,
+  CompanyAccessPatchInput,
   HealthStatus,
+  ListCompanySellerAccess200,
   ProductPhotoDocument,
-  ProductPhotoSuggestions
+  ProductPhotoSuggestions,
+  SellerImageSyncInput,
+  SellerImageSyncResult,
+  SellerShopDocument,
+  SellerShopSaveInput,
+  ShopAccessDocument
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -53,6 +60,504 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getSyncSellerImageUrl = () => {
+
+
+
+
+  return `/api/shop/images`
+}
+
+/**
+ * Verified member with enabled access required. Validated JPEG, PNG or WebP bytes, at most 6 MB. Content addressing makes identical-image retries idempotent within a shop.
+ * @summary Store an uploaded image in the assigned shop's Supabase database
+ */
+export const syncSellerImage = async (sellerImageSyncInput: SellerImageSyncInput, options?: Parameters<typeof customFetch>[1]): Promise<SellerImageSyncResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<SellerImageSyncResult>(getSyncSellerImageUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(sellerImageSyncInput)
+  }
+);}
+
+
+
+
+
+export const getSyncSellerImageMutationKey = () => ['syncSellerImage'] as const;
+
+export const getSyncSellerImageMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof syncSellerImage>>, TError,SyncSellerImageMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof syncSellerImage>>, TError,SyncSellerImageMutationVariables, TContext> => {
+
+const mutationKey = getSyncSellerImageMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof syncSellerImage>>, SyncSellerImageMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  syncSellerImage(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SyncSellerImageMutationResult = NonNullable<Awaited<ReturnType<typeof syncSellerImage>>>
+    export type SyncSellerImageMutationBody = BodyType<SellerImageSyncInput>
+    export type SyncSellerImageMutationError = ErrorType<void>
+    export type SyncSellerImageMutationVariables = {data: BodyType<SellerImageSyncInput>}
+
+    /**
+ * @summary Store an uploaded image in the assigned shop's Supabase database
+ */
+export const useSyncSellerImage = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof syncSellerImage>>, TError,SyncSellerImageMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof syncSellerImage>>,
+        TError,
+        SyncSellerImageMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSyncSellerImageMutationOptions(options));
+    }
+
+export const getGetSellerShopUrl = () => {
+
+
+
+
+  return `/api/shop`
+}
+
+/**
+ * No-store response. Paused accounts receive access metadata without catalog, sales or settings. The company administrator receives a company account without a shop ID.
+ * @summary Load the verified account's assigned shop and current access
+ */
+export const getSellerShop = async ( options?: Parameters<typeof customFetch>[1]): Promise<SellerShopDocument> => {
+
+  return customFetch<SellerShopDocument>(getGetSellerShopUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSellerShopQueryKey = () => {
+    return [
+    `/api/shop`
+    ] as const;
+    }
+
+
+export const getGetSellerShopQueryOptions = <TData = Awaited<ReturnType<typeof getSellerShop>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSellerShop>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSellerShopQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSellerShop>>> = ({ signal }) => getSellerShop({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSellerShop>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSellerShopQueryResult = NonNullable<Awaited<ReturnType<typeof getSellerShop>>>
+export type GetSellerShopQueryError = ErrorType<void>
+
+
+/**
+ * @summary Load the verified account's assigned shop and current access
+ */
+
+export function useGetSellerShop<TData = Awaited<ReturnType<typeof getSellerShop>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSellerShop>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSellerShopQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSaveSellerShopUrl = () => {
+
+
+
+
+  return `/api/shop`
+}
+
+/**
+ * Only shop members with enabled access may write. Entitlement and account access cannot be changed by this endpoint. A 409 preserves the cloud copy for client-side three-way reconciliation.
+ * @summary Save the device snapshot using optimistic concurrency
+ */
+export const saveSellerShop = async (sellerShopSaveInput: SellerShopSaveInput, options?: Parameters<typeof customFetch>[1]): Promise<SellerShopDocument> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<SellerShopDocument>(getSaveSellerShopUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(sellerShopSaveInput)
+  }
+);}
+
+
+
+
+
+export const getSaveSellerShopMutationKey = () => ['saveSellerShop'] as const;
+
+export const getSaveSellerShopMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveSellerShop>>, TError,SaveSellerShopMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveSellerShop>>, TError,SaveSellerShopMutationVariables, TContext> => {
+
+const mutationKey = getSaveSellerShopMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveSellerShop>>, SaveSellerShopMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveSellerShop(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveSellerShopMutationResult = NonNullable<Awaited<ReturnType<typeof saveSellerShop>>>
+    export type SaveSellerShopMutationBody = BodyType<SellerShopSaveInput>
+    export type SaveSellerShopMutationError = ErrorType<void>
+    export type SaveSellerShopMutationVariables = {data: BodyType<SellerShopSaveInput>}
+
+    /**
+ * @summary Save the device snapshot using optimistic concurrency
+ */
+export const useSaveSellerShop = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveSellerShop>>, TError,SaveSellerShopMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveSellerShop>>,
+        TError,
+        SaveSellerShopMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSaveSellerShopMutationOptions(options));
+    }
+
+export const getRequestSellerFullAccessUrl = () => {
+
+
+
+
+  return `/api/shop/upgrade-request`
+}
+
+/**
+ * Records a pending request, never grants Full access. Existing requests and approvals are returned without creating a new request.
+ * @summary Request company approval for Full access
+ */
+export const requestSellerFullAccess = async ( options?: Parameters<typeof customFetch>[1]): Promise<SellerShopDocument> => {
+
+  return customFetch<SellerShopDocument>(getRequestSellerFullAccessUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRequestSellerFullAccessMutationKey = () => ['requestSellerFullAccess'] as const;
+
+export const getRequestSellerFullAccessMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestSellerFullAccess>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof requestSellerFullAccess>>, TError,void, TContext> => {
+
+const mutationKey = getRequestSellerFullAccessMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof requestSellerFullAccess>>, void> = () => {
+
+
+          return  requestSellerFullAccess(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RequestSellerFullAccessMutationResult = NonNullable<Awaited<ReturnType<typeof requestSellerFullAccess>>>
+
+    export type RequestSellerFullAccessMutationError = ErrorType<void>
+
+
+    /**
+ * @summary Request company approval for Full access
+ */
+export const useRequestSellerFullAccess = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestSellerFullAccess>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof requestSellerFullAccess>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getRequestSellerFullAccessMutationOptions(options));
+    }
+
+export const getListCompanySellerAccessUrl = () => {
+
+
+
+
+  return `/api/shop/sellers`
+}
+
+/**
+ * @summary List existing shops, member emails and access for the company administrator
+ */
+export const listCompanySellerAccess = async ( options?: Parameters<typeof customFetch>[1]): Promise<ListCompanySellerAccess200> => {
+
+  return customFetch<ListCompanySellerAccess200>(getListCompanySellerAccessUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCompanySellerAccessQueryKey = () => {
+    return [
+    `/api/shop/sellers`
+    ] as const;
+    }
+
+
+export const getListCompanySellerAccessQueryOptions = <TData = Awaited<ReturnType<typeof listCompanySellerAccess>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCompanySellerAccess>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCompanySellerAccessQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCompanySellerAccess>>> = ({ signal }) => listCompanySellerAccess({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCompanySellerAccess>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCompanySellerAccessQueryResult = NonNullable<Awaited<ReturnType<typeof listCompanySellerAccess>>>
+export type ListCompanySellerAccessQueryError = ErrorType<void>
+
+
+/**
+ * @summary List existing shops, member emails and access for the company administrator
+ */
+
+export function useListCompanySellerAccess<TData = Awaited<ReturnType<typeof listCompanySellerAccess>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCompanySellerAccess>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCompanySellerAccessQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateCompanySellerAccessUrl = (id: string,) => {
+
+
+
+
+  return `/api/shop/sellers/${id}`
+}
+
+/**
+ * Company administrator only. Changes apply to all shop members. Existing data is retained and the revision increases.
+ * @summary Approve or downgrade a shop plan, or pause or restore its access
+ */
+export const updateCompanySellerAccess = async (id: string,
+    companyAccessPatchInput: CompanyAccessPatchInput, options?: Parameters<typeof customFetch>[1]): Promise<ShopAccessDocument> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ShopAccessDocument>(getUpdateCompanySellerAccessUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(companyAccessPatchInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateCompanySellerAccessMutationKey = () => ['updateCompanySellerAccess'] as const;
+
+export const getUpdateCompanySellerAccessMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCompanySellerAccess>>, TError,UpdateCompanySellerAccessMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateCompanySellerAccess>>, TError,UpdateCompanySellerAccessMutationVariables, TContext> => {
+
+const mutationKey = getUpdateCompanySellerAccessMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateCompanySellerAccess>>, UpdateCompanySellerAccessMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateCompanySellerAccess(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateCompanySellerAccessMutationResult = NonNullable<Awaited<ReturnType<typeof updateCompanySellerAccess>>>
+    export type UpdateCompanySellerAccessMutationBody = BodyType<CompanyAccessPatchInput>
+    export type UpdateCompanySellerAccessMutationError = ErrorType<void>
+    export type UpdateCompanySellerAccessMutationVariables = {id: string;data: BodyType<CompanyAccessPatchInput>}
+
+    /**
+ * @summary Approve or downgrade a shop plan, or pause or restore its access
+ */
+export const useUpdateCompanySellerAccess = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCompanySellerAccess>>, TError,UpdateCompanySellerAccessMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateCompanySellerAccess>>,
+        TError,
+        UpdateCompanySellerAccessMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateCompanySellerAccessMutationOptions(options));
+    }
 
 export const getHealthCheckUrl = () => {
 

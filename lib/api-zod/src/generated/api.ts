@@ -9,6 +9,148 @@ import * as zod from 'zod';
 
 
 /**
+ * Verified member with enabled access required. Validated JPEG, PNG or WebP bytes, at most 6 MB. Content addressing makes identical-image retries idempotent within a shop.
+ * @summary Store an uploaded image in the assigned shop's Supabase database
+ */
+export const syncSellerImageBodyBase64Min = 4;
+export const syncSellerImageBodyBase64Max = 8000000;
+
+
+export const syncSellerImageBodyBase64RegExp = new RegExp('^[A-Za-z0-9+/]+={0,2}$');
+
+
+export const SyncSellerImageBody = zod.object({
+  "contentType": zod.enum(['image/jpeg', 'image/png', 'image/webp']),
+  "base64": zod.string().min(syncSellerImageBodyBase64Min).max(syncSellerImageBodyBase64Max).regex(syncSellerImageBodyBase64RegExp)
+})
+
+export const SyncSellerImageResponse = zod.object({
+  "imageUrl": zod.string()
+})
+
+
+/**
+ * No-store response. Paused accounts receive access metadata without catalog, sales or settings. The company administrator receives a company account without a shop ID.
+ * @summary Load the verified account's assigned shop and current access
+ */
+export const GetSellerShopResponse = zod.object({
+  "shopId": zod.string().nullable(),
+  "shopName": zod.string(),
+  "email": zod.string(),
+  "role": zod.string(),
+  "isCompanyAdmin": zod.boolean(),
+  "premiumApproved": zod.boolean(),
+  "accessEnabled": zod.boolean(),
+  "upgradeRequestedAt": zod.coerce.date().nullable(),
+  "mode": zod.enum(['basic', 'full']),
+  "catalog": zod.array(zod.unknown()),
+  "sales": zod.array(zod.unknown()),
+  "settings": zod.record(zod.string(), zod.unknown()),
+  "revision": zod.number().int(),
+  "isNew": zod.boolean().optional()
+})
+
+
+/**
+ * Only shop members with enabled access may write. Entitlement and account access cannot be changed by this endpoint. A 409 preserves the cloud copy for client-side three-way reconciliation.
+ * @summary Save the device snapshot using optimistic concurrency
+ */
+export const saveSellerShopBodyCatalogMax = 5000;
+
+export const saveSellerShopBodySalesMax = 100000;
+
+
+
+
+export const SaveSellerShopBody = zod.object({
+  "shopId": zod.string().optional().describe('New clients provide their exact assigned shop ID; optional for existing clients.'),
+  "catalog": zod.array(zod.unknown()).max(saveSellerShopBodyCatalogMax),
+  "sales": zod.array(zod.unknown()).max(saveSellerShopBodySalesMax),
+  "settings": zod.record(zod.string(), zod.unknown()),
+  "revision": zod.number().int().min(1)
+})
+
+export const SaveSellerShopResponse = zod.object({
+  "shopId": zod.string().nullable(),
+  "shopName": zod.string(),
+  "email": zod.string(),
+  "role": zod.string(),
+  "isCompanyAdmin": zod.boolean(),
+  "premiumApproved": zod.boolean(),
+  "accessEnabled": zod.boolean(),
+  "upgradeRequestedAt": zod.coerce.date().nullable(),
+  "mode": zod.enum(['basic', 'full']),
+  "catalog": zod.array(zod.unknown()),
+  "sales": zod.array(zod.unknown()),
+  "settings": zod.record(zod.string(), zod.unknown()),
+  "revision": zod.number().int(),
+  "isNew": zod.boolean().optional()
+})
+
+
+/**
+ * Records a pending request, never grants Full access. Existing requests and approvals are returned without creating a new request.
+ * @summary Request company approval for Full access
+ */
+export const RequestSellerFullAccessResponse = zod.object({
+  "shopId": zod.string().nullable(),
+  "shopName": zod.string(),
+  "email": zod.string(),
+  "role": zod.string(),
+  "isCompanyAdmin": zod.boolean(),
+  "premiumApproved": zod.boolean(),
+  "accessEnabled": zod.boolean(),
+  "upgradeRequestedAt": zod.coerce.date().nullable(),
+  "mode": zod.enum(['basic', 'full']),
+  "catalog": zod.array(zod.unknown()),
+  "sales": zod.array(zod.unknown()),
+  "settings": zod.record(zod.string(), zod.unknown()),
+  "revision": zod.number().int(),
+  "isNew": zod.boolean().optional()
+})
+
+
+/**
+ * @summary List existing shops, member emails and access for the company administrator
+ */
+export const ListCompanySellerAccessResponse = zod.object({
+  "sellers": zod.array(zod.object({
+  "id": zod.string(),
+  "premiumApproved": zod.boolean(),
+  "accessEnabled": zod.boolean(),
+  "upgradeRequestedAt": zod.coerce.date().nullable()
+}).and(zod.object({
+  "name": zod.string(),
+  "members": zod.array(zod.object({
+  "email": zod.string(),
+  "role": zod.string()
+}))
+})))
+})
+
+
+/**
+ * Company administrator only. Changes apply to all shop members. Existing data is retained and the revision increases.
+ * @summary Approve or downgrade a shop plan, or pause or restore its access
+ */
+export const UpdateCompanySellerAccessParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const UpdateCompanySellerAccessBody = zod.object({
+  "premiumApproved": zod.boolean().optional(),
+  "accessEnabled": zod.boolean().optional()
+})
+
+export const UpdateCompanySellerAccessResponse = zod.object({
+  "id": zod.string(),
+  "premiumApproved": zod.boolean(),
+  "accessEnabled": zod.boolean(),
+  "upgradeRequestedAt": zod.coerce.date().nullable()
+})
+
+
+/**
  * Returns server health status
  * @summary Health check
  */

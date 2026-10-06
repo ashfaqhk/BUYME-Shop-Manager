@@ -1,36 +1,28 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ClerkProvider, SignIn, SignUp, useAuth, useClerk, useUser } from "@clerk/react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { ClerkProvider, SignIn, SignUp, useAuth, useClerk } from "@clerk/react";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
-import type { Product } from "./catalog-data";
+import CompanyAdminPanel from "./CompanyAdminPanel";
+import type { ShopState, Snapshot } from "./shop-types";
+import { activeOfflineUser, useOnline, useShopSync } from "./use-shop-sync";
+import { clearOfflineUser } from "./offline-store";
+export { uploadSellerPhoto } from "./shop-photos";
+export type { ShopState } from "./shop-types";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const publishableKey = publishableKeyFromHost(window.location.hostname, import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
 if (!publishableKey) throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY.");
 
-export type ShopState = {
-  shopId: string;
-  shopName: string;
-  email: string;
-  role: string;
-  isCompanyAdmin: boolean;
-  premiumApproved: boolean;
-  mode: "basic" | "full";
-  catalog: Product[];
-  sales: unknown[];
-  settings: Record<string, unknown>;
-  revision: number;
-  isNew?: boolean;
-};
-
-type Snapshot = Pick<ShopState, "catalog" | "sales" | "settings">;
 type SellerContextValue = {
   shop: ShopState;
   save: (snapshot: Snapshot) => Promise<void>;
+  updateSnapshot: (update: Snapshot | ((previous: Snapshot) => Snapshot)) => Promise<void>;
   saveStatus: string;
   retrySave: () => void;
   refresh: () => Promise<ShopState>;
+  requestFull: () => Promise<void>;
+  signOut: () => Promise<void>;
 };
 const SellerContext = createContext<SellerContextValue | null>(null);
 export function useSellerShop() {
@@ -39,24 +31,8 @@ export function useSellerShop() {
   return value;
 }
 
-async function uploadDataImage(dataUrl: string): Promise<string> {
-  const blob = await (await fetch(dataUrl)).blob();
-  const mime = blob.type as "image/jpeg" | "image/png" | "image/webp";
-  if (!["image/jpeg", "image/png", "image/webp"].includes(mime) || blob.size > 6_000_000) throw new Error("Shop images must be JPEG, PNG or WebP and under 6 MB.");
-  const signed = await fetch("/api/shop/images/upload-url", {
-    method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contentType: mime, byteLength: blob.size }),
-  });
-  if (!signed.ok) throw new Error("Could not prepare a secure photo upload.");
-  const { uploadURL, imageUrl } = await signed.json() as { uploadURL: string; imageUrl: string };
-  const uploaded = await fetch(uploadURL, { method: "PUT", headers: { "Content-Type": mime }, body: blob });
-  if (!uploaded.ok) throw new Error("Photo upload failed. Check your connection and try again.");
-  return imageUrl;
-}
-export const uploadSellerPhoto = uploadDataImage;
-
 export function AccountBar({ email, role, mode, saveStatus, onRetry }: { email: string; role: string; mode: string; saveStatus: string; onRetry: () => void }) {
-  const { signOut } = useClerk();
+  const { signOut } = useSellerShop();
   const [open, setOpen] = useState(false);
   const [team, setTeam] = useState<{ email: string; role: string }[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -84,8 +60,8 @@ export function AccountBar({ email, role, mode, saveStatus, onRetry }: { email: 
   const unsaved = saveStatus && saveStatus !== "All changes saved";
   return <div className="relative flex items-center gap-2">
     <span className={`hidden rounded-full px-3 py-1.5 text-[10px] font-extrabold sm:inline ${mode === "full" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>{mode === "full" ? "Premium" : "Basic"}</span>
-    {saveStatus && <span role="status" className={`hidden max-w-48 truncate text-[10px] sm:inline ${unsaved ? "text-destructive" : "text-muted-foreground"}`}>{saveStatus}</span>}
-    {unsaved && <button type="button" onClick={onRetry} className="text-[10px] font-bold text-primary underline">{saveStatus.toLowerCase().includes("changed on another device") ? "Reload latest" : "Retry save"}</button>}
+    {saveStatus && <span role="status" title={saveStatus} className={`max-w-36 text-[10px] sm:max-w-64 ${unsaved ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}>{saveStatus}</span>}
+    {unsaved && <button type="button" onClick={onRetry} className="text-[10px] font-bold text-primary underline">Sync now</button>}
     <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-left text-xs font-bold">
       <span className="flex size-7 items-center justify-center rounded-full bg-primary/10 text-primary">{email.slice(0, 1).toUpperCase()}</span>
       <span className="max-w-36 truncate">{email}</span>
@@ -94,27 +70,9 @@ export function AccountBar({ email, role, mode, saveStatus, onRetry }: { email: 
       <h3 className="font-extrabold">Shop account</h3><p className="mt-1 text-xs text-muted-foreground">{role === "owner" ? "Shop owner" : "Team member"} · {mode === "full" ? "Premium access" : "Basic access"}</p>
       {role === "owner" && <><form onSubmit={invite} className="mt-4 flex gap-2"><input type="email" required value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} className="field min-w-0 flex-1" placeholder="Team member email" /><button disabled={busy} className="rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground">{busy ? "Sending…" : "Invite"}</button></form><h4 className="mt-4 text-xs font-bold">Shop team</h4><div className="mt-2 space-y-1">{team.map((member) => <p key={`${member.email}-${member.role}`} className="flex justify-between text-xs"><span>{member.email}</span><span className="text-muted-foreground">{member.role}</span></p>)}</div></>}
       {message && <p role="status" className="mt-3 text-xs text-muted-foreground">{message}</p>}
-      <button type="button" onClick={() => void signOut({ redirectUrl: basePath || "/" })} className="mt-4 w-full rounded-lg border border-border px-3 py-2 text-xs font-bold">Sign out</button>
+      <button type="button" onClick={() => void signOut().catch((cause) => setMessage(cause instanceof Error ? cause.message : "Could not sign out."))} className="mt-4 w-full rounded-lg border border-border px-3 py-2 text-xs font-bold">Sign out</button>
     </section>}
   </div>;
-}
-
-async function externalizePhotos(snapshot: Snapshot): Promise<Snapshot> {
-  const cache = new Map<string, string>();
-  const convert = async (value: unknown): Promise<unknown> => {
-    if (typeof value === "string" && value.startsWith("data:image/")) {
-      if (!cache.has(value)) cache.set(value, await uploadDataImage(value));
-      return cache.get(value)!;
-    }
-    if (Array.isArray(value)) return Promise.all(value.map(convert));
-    if (value && typeof value === "object") {
-      const result: Record<string, unknown> = {};
-      for (const [key, item] of Object.entries(value)) result[key] = await convert(item);
-      return result;
-    }
-    return value;
-  };
-  return await convert(snapshot) as Snapshot;
 }
 
 function savedLocalSnapshot(): Snapshot | null {
@@ -148,14 +106,20 @@ function saveLocalImportChoice(shopId: string, choice: "imported" | "fresh") {
 }
 
 function AccessRouter({ children }: { children: ReactNode }) {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
+  const { signOut } = useClerk();
+  const online = useOnline();
   const path = window.location.pathname.slice(basePath.length) || "/";
   const atSignIn = path.startsWith("/sign-in");
   const atSignUp = path.startsWith("/sign-up");
-  if (!isLoaded) return <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Loading BUYME…</div>;
+  const cachedUser = !online ? activeOfflineUser() : null;
+  if (!atSignIn && !atSignUp && cachedUser && (!isLoaded || !isSignedIn)) {
+    return <AccountGate key={cachedUser} userId={cachedUser} authenticated={false} onSignOut={() => signOut({ redirectUrl: basePath || "/" })}>{children}</AccountGate>;
+  }
+  if (!isLoaded) return <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">{online ? "Loading BUYME…" : "Connect once and sign in to use BUYME on this device."}</div>;
   if (atSignIn) return <AuthFrame><SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} /></AuthFrame>;
   if (atSignUp) return <AuthFrame><SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} /></AuthFrame>;
-  return isSignedIn ? <AccountGate>{children}</AccountGate> : <WelcomePage />;
+  return isSignedIn && userId ? <AccountGate key={userId} userId={userId} authenticated onSignOut={() => signOut({ redirectUrl: basePath || "/" })}>{children}</AccountGate> : <WelcomePage />;
 }
 
 function AuthFrame({ children }: { children: ReactNode }) {
@@ -175,6 +139,17 @@ function WelcomePage() {
 }
 
 export function BuymeAccess({ children }: { children: ReactNode }) {
+  const online = useOnline();
+  const [bootedOffline] = useState(() => !navigator.onLine);
+  const cachedUser = bootedOffline && !online ? activeOfflineUser() : null;
+  // Cold offline startup must not depend on downloading Clerk's JavaScript.
+  // This is only the last signed-in device copy; it cannot make authenticated
+  // API requests. Reconnecting returns to Clerk before attempting a cloud sync.
+  if (cachedUser && !window.location.pathname.includes("/sign-")) {
+    return <AccountGate key={cachedUser} userId={cachedUser} authenticated={false} onSignOut={async () => {
+      clearOfflineUser(); window.location.assign(`${basePath}/sign-in`);
+    }}>{children}</AccountGate>;
+  }
   return <ClerkProvider
     publishableKey={publishableKey}
     proxyUrl={clerkProxyUrl}
@@ -193,81 +168,19 @@ export function BuymeAccess({ children }: { children: ReactNode }) {
   </ClerkProvider>;
 }
 
-function AccountGate({ children }: { children: ReactNode }) {
-  const { user } = useUser();
-  const { signOut } = useClerk();
-  const [shop, setShop] = useState<ShopState | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [saveStatus, setSaveStatus] = useState("");
+function AccountGate({ children, userId, authenticated, onSignOut }: { children: ReactNode; userId: string; authenticated: boolean; onSignOut: () => Promise<void> }) {
+  const sync = useShopSync(userId, authenticated);
+  const { shop, loading, error, saveStatus, save: commit, updateSnapshot, retrySave, refresh, requestFull } = sync;
   const [localSnapshot, setLocalSnapshot] = useState<Snapshot | null>(null);
-  const revision = useRef(0);
-  const latest = useRef<Snapshot | null>(null);
-  const queue = useRef<Promise<void>>(Promise.resolve());
-
-  const refresh = useCallback(async () => {
-    const response = await fetch("/api/shop", { credentials: "include" });
-    if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "Could not load your shop.");
-    const data = await response.json() as ShopState;
-    revision.current = data.revision;
-    setShop(data);
-    return data;
-  }, []);
-
   useEffect(() => {
-    let active = true;
-    refresh().then((data) => {
-      if (!active) return;
-      if (!data.isCompanyAdmin && data.role === "owner" && data.isNew) {
-        if (!hasLocalImportChoice(data.shopId)) setLocalSnapshot(savedLocalSnapshot());
-      }
-      setError("");
-    }).catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load your shop."))
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!shop || shop.isCompanyAdmin) return;
-    const timer = window.setInterval(() => {
-      refresh().then((data) => {
-        if (data.mode !== shop.mode) window.location.reload();
-      }).catch(() => undefined);
-    }, 30000);
-    return () => window.clearInterval(timer);
-  }, [refresh, shop?.shopId, shop?.mode, shop?.isCompanyAdmin]);
-
-  const commit = useCallback((snapshot: Snapshot) => {
-    latest.current = snapshot;
-    setSaveStatus("Saving…");
-    queue.current = queue.current.catch(() => undefined).then(async () => {
-      const safeData = await externalizePhotos(snapshot);
-      const response = await fetch("/api/shop", {
-        method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...safeData, revision: revision.current }),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        throw new Error(body?.error || "Shop changes could not be saved.");
-      }
-      const result = await response.json() as ShopState;
-      revision.current = result.revision;
-      setShop(result);
-      setSaveStatus("All changes saved");
-    }).catch((cause) => {
-      setSaveStatus(cause instanceof Error ? cause.message : "Shop changes could not be saved.");
-      throw cause;
-    });
-    return queue.current;
-  }, []);
-
-  const retrySave = () => {
-    if (saveStatus.toLowerCase().includes("changed on another device")) {
-      if (!window.confirm("Another device has newer shop data. Reload the latest version? Unsaved changes on this device will be discarded.")) return;
-      void refresh().then(() => window.location.reload()).catch((cause) => setSaveStatus(cause instanceof Error ? cause.message : "Could not reload the latest shop data."));
-      return;
-    }
-    if (latest.current) void commit(latest.current).catch(() => undefined);
+    if (shop && !shop.isCompanyAdmin && shop.role === "owner" && shop.isNew && !hasLocalImportChoice(shop.shopId)) setLocalSnapshot(savedLocalSnapshot());
+  }, [shop?.shopId, shop?.isNew, shop?.role, shop?.isCompanyAdmin]);
+  const signOut = async () => {
+    await sync.flushDevice();
+    if (saveStatus !== "All changes saved" && shop && !shop.isCompanyAdmin &&
+      !window.confirm("Changes waiting to sync will stay on this device for this account. Sign back in to sync them. Sign out now?")) return;
+    clearOfflineUser();
+    await onSignOut();
   };
 
   const importSnapshot = async (snapshot: Snapshot) => {
@@ -281,41 +194,14 @@ function AccountGate({ children }: { children: ReactNode }) {
   };
 
   if (loading) return <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Loading your shop…</div>;
-  if (error) return <main className="flex min-h-screen items-center justify-center p-5"><section className="max-w-lg rounded-2xl border border-border bg-card p-6"><h1 className="text-xl font-bold">Could not open BUYME</h1><p className="mt-2 text-sm text-muted-foreground">{error}</p><div className="mt-5 flex gap-3"><button className="rounded-xl bg-primary px-4 py-2 text-sm font-bold text-primary-foreground" onClick={() => window.location.reload()}>Try again</button><button className="rounded-xl border border-border px-4 py-2 text-sm font-bold" onClick={() => void signOut({ redirectUrl: basePath || "/" })}>Sign out</button></div></section></main>;
+   if (error && !shop) return <main className="flex min-h-screen items-center justify-center p-5"><section className="max-w-lg rounded-2xl border border-border bg-card p-6"><h1 className="text-xl font-bold">Could not open BUYME</h1><p className="mt-2 text-sm text-muted-foreground">{error}</p><div className="mt-5 flex gap-3"><button className="rounded-xl bg-primary px-4 py-2 text-sm font-bold text-primary-foreground" onClick={() => window.location.reload()}>Try again</button><button className="rounded-xl border border-border px-4 py-2 text-sm font-bold" onClick={() => void signOut()}>Sign out</button></div></section></main>;
   if (!shop) return null;
-  if (shop.isCompanyAdmin) return <CompanyAdminPanel email={shop.email} onSignOut={() => void signOut({ redirectUrl: basePath || "/" })} />;
+  if (shop.isCompanyAdmin) return <CompanyAdminPanel email={shop.email} onSignOut={() => void signOut()} />;
+  if (!shop.accessEnabled) return <main className="flex min-h-[100dvh] items-center justify-center p-5"><section className="max-w-lg rounded-2xl border border-border bg-card p-6"><h1 className="text-xl font-extrabold">Shop access is paused</h1><p className="mt-3 text-sm text-muted-foreground">Contact the BUYME company administrator with {shop.email}. Your shop and any device changes have not been deleted.</p><div className="mt-5 flex gap-3"><button onClick={retrySave} className="rounded-xl bg-primary px-4 py-2 font-bold text-primary-foreground">Check access</button><button onClick={() => void signOut()} className="rounded-xl border border-border px-4 py-2 font-bold">Sign out</button></div></section></main>;
   if (localSnapshot) return <main className="flex min-h-[100dvh] items-center justify-center bg-background p-5"><section className="w-full max-w-xl rounded-2xl border border-border bg-card p-6 shadow-xl sm:p-8"><p className="text-xs font-bold uppercase tracking-widest text-primary">Shop data on this device</p><h1 className="mt-3 text-2xl font-extrabold">Import your existing shop?</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">This browser has a catalog, sales or settings saved locally. Import them into <strong>{shop.email}</strong>’s new shop, or start with an empty shop. Nothing is moved unless you choose import.</p><div className="mt-6 flex flex-wrap gap-3"><button onClick={() => void importSnapshot(localSnapshot)} className="rounded-xl bg-primary px-4 py-3 text-sm font-extrabold text-primary-foreground">Import this shop</button><button onClick={startFresh} className="rounded-xl border border-border px-4 py-3 text-sm font-bold">Start fresh</button></div>{saveStatus && <p className="mt-4 text-xs text-muted-foreground">{saveStatus}</p>}</section></main>;
 
-  return <SellerContext.Provider value={{ shop, save: commit, saveStatus, retrySave, refresh }}>
+  return <SellerContext.Provider value={{ shop, save: commit, updateSnapshot, saveStatus, retrySave, refresh, requestFull, signOut }}>
+    {sync.conflicts.length > 0 && <section role="alert" className="sticky top-0 z-50 border-b border-amber-300 bg-amber-50 p-4 text-amber-950"><div className="mx-auto max-w-5xl"><h2 className="font-extrabold">Changes need your choice</h2><p className="mt-1 text-sm">{sync.conflicts.length} field(s) changed differently on this device and in the cloud. Independent edits will be kept. A backup of this device copy is kept before applying your choice.</p><details className="mt-2 text-xs"><summary>Conflicting fields</summary><ul>{sync.conflicts.map((path) => <li key={path}>{path}</li>)}</ul></details><div className="mt-3 flex flex-wrap gap-2"><button disabled={sync.resolving} onClick={() => void sync.resolveConflict("device")} className="rounded-lg border border-amber-400 px-3 py-2 text-sm font-bold">Use device values for conflicts</button><button disabled={sync.resolving} onClick={() => void sync.resolveConflict("cloud")} className="rounded-lg border border-amber-400 px-3 py-2 text-sm font-bold">Use cloud values for conflicts</button></div></div></section>}
     {children}
   </SellerContext.Provider>;
-}
-
-function CompanyAdminPanel({ email, onSignOut }: { email: string; onSignOut: () => void }) {
-  const [sellers, setSellers] = useState<{ id: string; name: string; premiumApproved: boolean; members: { email: string; role: string }[] }[]>([]);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState("");
-  const load = useCallback(async () => {
-    const response = await fetch("/api/shop/sellers", { credentials: "include" });
-    if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "Could not load seller accounts.");
-    const body = await response.json() as { sellers: typeof sellers };
-    setSellers(body.sellers);
-  }, []);
-  useEffect(() => { load().catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load sellers.")); }, [load]);
-  const setPremium = async (id: string, premiumApproved: boolean) => {
-    setBusy(id); setError("");
-    try {
-      const response = await fetch(`/api/shop/sellers/${encodeURIComponent(id)}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ premiumApproved }) });
-      if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "Could not update access.");
-      setSellers((items) => items.map((item) => item.id === id ? { ...item, premiumApproved } : item));
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not update access."); }
-    finally { setBusy(""); }
-  };
-  return <main className="min-h-[100dvh] bg-background px-5 py-8 sm:px-10"><div className="mx-auto max-w-5xl">
-    <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5"><div><p className="text-xs font-bold uppercase tracking-widest text-primary">BUYME company</p><h1 className="mt-2 text-3xl font-extrabold">Seller access</h1><p className="mt-1 text-sm text-muted-foreground">Signed in as {email}</p></div><button onClick={onSignOut} className="rounded-xl border border-border px-4 py-2 text-sm font-bold">Sign out</button></header>
-    <section className="mt-7 rounded-2xl border border-border bg-card p-5 sm:p-7"><div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-extrabold">Shops and plans</h2><p className="mt-1 text-sm text-muted-foreground">New shops start on Basic. Approving Premium enables the Full version for everyone in that shop.</p></div><button onClick={() => load().catch((cause) => setError(cause instanceof Error ? cause.message : "Could not refresh."))} className="rounded-xl border border-border px-3 py-2 text-xs font-bold">Refresh</button></div>
-      {error && <p role="alert" className="mt-4 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
-      {sellers.length ? <div className="mt-5 divide-y divide-border">{sellers.map((seller) => <article key={seller.id} className="flex flex-wrap items-center justify-between gap-4 py-4"><div><h3 className="font-bold">{seller.name}</h3><p className="mt-1 text-xs text-muted-foreground">{seller.members.map((member) => `${member.email} (${member.role})`).join(" · ") || "No members"}</p></div><button disabled={busy === seller.id} onClick={() => void setPremium(seller.id, !seller.premiumApproved)} className={`rounded-xl px-4 py-2.5 text-xs font-extrabold ${seller.premiumApproved ? "border border-border" : "bg-primary text-primary-foreground"}`}>{busy === seller.id ? "Saving…" : seller.premiumApproved ? "Premium · switch to Basic" : "Approve Premium"}</button></article>)}</div> : !error ? <p className="mt-6 rounded-xl bg-muted/40 p-5 text-sm text-muted-foreground">No seller shops yet. They will appear here after a seller creates an account.</p> : null}
-    </section>
-  </div></main>;
 }

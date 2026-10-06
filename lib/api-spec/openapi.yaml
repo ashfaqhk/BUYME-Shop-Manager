@@ -15,6 +15,150 @@ tags:
   - name: catalog
     description: Product photo recognition
 paths:
+  /shop/images:
+    post:
+      operationId: syncSellerImage
+      tags: [shop]
+      summary: Store an uploaded image in the assigned shop's Supabase database
+      description: Verified member with enabled access required. Validated JPEG, PNG or WebP bytes, at most 6 MB. Content addressing makes identical-image retries idempotent within a shop.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SellerImageSyncInput"
+      responses:
+        "200":
+          description: Private shop image URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerImageSyncResult"
+        "400":
+          description: Invalid or oversized image
+        "401":
+          description: Verified sign-in required
+        "403":
+          description: Shop access paused
+        "404":
+          description: No assigned shop
+  /shop:
+    get:
+      operationId: getSellerShop
+      tags: [shop]
+      summary: Load the verified account's assigned shop and current access
+      description: No-store response. Paused accounts receive access metadata without catalog, sales or settings. The company administrator receives a company account without a shop ID.
+      responses:
+        "200":
+          description: Shop or company account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerShopDocument"
+        "401":
+          description: Verified sign-in required
+        "403":
+          description: Shop assignment unavailable
+    put:
+      operationId: saveSellerShop
+      tags: [shop]
+      summary: Save the device snapshot using optimistic concurrency
+      description: Only shop members with enabled access may write. Entitlement and account access cannot be changed by this endpoint. A 409 preserves the cloud copy for client-side three-way reconciliation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SellerShopSaveInput"
+      responses:
+        "200":
+          description: Acknowledged cloud snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerShopDocument"
+        "400":
+          description: Invalid snapshot
+        "401":
+          description: Verified sign-in required
+        "403":
+          description: Shop access paused
+        "404":
+          description: Not a member of the requested shop
+        "409":
+          description: Cloud revision or access changed
+  /shop/upgrade-request:
+    post:
+      operationId: requestSellerFullAccess
+      tags: [shop]
+      summary: Request company approval for Full access
+      description: Records a pending request, never grants Full access. Existing requests and approvals are returned without creating a new request.
+      responses:
+        "200":
+          description: Current shop with request status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerShopDocument"
+        "401":
+          description: Verified sign-in required
+        "403":
+          description: Shop access paused
+        "404":
+          description: No assigned shop
+        "409":
+          description: Access changed
+  /shop/sellers:
+    get:
+      operationId: listCompanySellerAccess
+      tags: [shop]
+      summary: List existing shops, member emails and access for the company administrator
+      responses:
+        "200":
+          description: No-store seller access list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sellers]
+                properties:
+                  sellers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CompanySellerDocument"
+        "403":
+          description: Verified company administrator email required
+  /shop/sellers/{id}:
+    patch:
+      operationId: updateCompanySellerAccess
+      tags: [shop]
+      summary: Approve or downgrade a shop plan, or pause or restore its access
+      description: Company administrator only. Changes apply to all shop members. Existing data is retained and the revision increases.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyAccessPatchInput"
+      responses:
+        "200":
+          description: Updated access metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShopAccessDocument"
+        "400":
+          description: Choose a plan or access change
+        "403":
+          description: Verified company administrator email required
+        "404":
+          description: Shop not found
   /healthz:
     get:
       operationId: healthCheck
@@ -86,6 +230,121 @@ paths:
           description: Photo reading service failed
 components:
   schemas:
+    SellerImageSyncInput:
+      type: object
+      required: [contentType, base64]
+      properties:
+        contentType:
+          type: string
+          enum: [image/jpeg, image/png, image/webp]
+        base64:
+          type: string
+          minLength: 4
+          maxLength: 8000000
+          pattern: '^[A-Za-z0-9+/]+={0,2}$'
+    SellerImageSyncResult:
+      type: object
+      required: [imageUrl]
+      properties:
+        imageUrl:
+          type: string
+    CompanyAccessPatchInput:
+      type: object
+      minProperties: 1
+      properties:
+        premiumApproved:
+          type: boolean
+        accessEnabled:
+          type: boolean
+    SellerShopSaveInput:
+      type: object
+      required: [catalog, sales, settings, revision]
+      properties:
+        shopId:
+          type: string
+          description: New clients provide their exact assigned shop ID; optional for existing clients.
+        catalog:
+          type: array
+          maxItems: 5000
+          items: {}
+        sales:
+          type: array
+          maxItems: 100000
+          items: {}
+        settings:
+          type: object
+          additionalProperties: true
+        revision:
+          type: integer
+          minimum: 1
+    SellerShopDocument:
+      type: object
+      required: [shopId, shopName, email, role, isCompanyAdmin, premiumApproved, accessEnabled, upgradeRequestedAt, mode, catalog, sales, settings, revision]
+      properties:
+        shopId:
+          type: [string, "null"]
+        shopName:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+        isCompanyAdmin:
+          type: boolean
+        premiumApproved:
+          type: boolean
+        accessEnabled:
+          type: boolean
+        upgradeRequestedAt:
+          type: [string, "null"]
+          format: date-time
+        mode:
+          type: string
+          enum: [basic, full]
+        catalog:
+          type: array
+          items: {}
+        sales:
+          type: array
+          items: {}
+        settings:
+          type: object
+          additionalProperties: true
+        revision:
+          type: integer
+        isNew:
+          type: boolean
+    ShopAccessDocument:
+      type: object
+      required: [id, premiumApproved, accessEnabled, upgradeRequestedAt]
+      properties:
+        id:
+          type: string
+        premiumApproved:
+          type: boolean
+        accessEnabled:
+          type: boolean
+        upgradeRequestedAt:
+          type: [string, "null"]
+          format: date-time
+    CompanySellerDocument:
+      allOf:
+        - $ref: "#/components/schemas/ShopAccessDocument"
+        - type: object
+          required: [name, members]
+          properties:
+            name:
+              type: string
+            members:
+              type: array
+              items:
+                type: object
+                required: [email, role]
+                properties:
+                  email:
+                    type: string
+                  role:
+                    type: string
     HealthStatus:
       type: object
       properties:

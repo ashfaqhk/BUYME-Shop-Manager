@@ -33,6 +33,8 @@ app.use(cors({ credentials: true, origin: true }));
 // This one route accepts a single, short-lived document encoded as a data URL.
 app.use("/api/billing/extract-list", express.json({ limit: "9mb" }));
 app.use("/api/catalog/scan-product", express.json({ limit: "9mb" }));
+app.use("/api/shop/images", express.json({ limit: "9mb" }));
+app.use("/api/shop", express.json({ limit: "64mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(clerkMiddleware((req) => ({

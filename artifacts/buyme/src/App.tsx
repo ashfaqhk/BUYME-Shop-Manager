@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { categories, type Product, type Variant } from './catalog-data';
 import BillingCalculator from './BillingCalculator';
@@ -8,6 +8,9 @@ import { createBillPdf, getUpiUri } from './billing-documents';
 import { accountUpiUri, prepareQrImage, validatePaymentQR, type PaymentQR } from './payment-profiles';
 import { roundMoney, roundQuantity, validQuantity } from './quantity-units';
 import { AccountBar, BuymeAccess, uploadSellerPhoto, useSellerShop } from './SellerAccess';
+import PlanAccess from './PlanAccess';
+import ReportExport, { ReportDownload } from './ReportExport';
+import { sameData } from './shop-merge';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -123,14 +126,40 @@ function initials(name: string) {
 }
 
 function ShopWorkspace() {
-  const { shop, save, saveStatus, retrySave } = useSellerShop();
+  const { shop, updateSnapshot, saveStatus, retrySave } = useSellerShop();
   const [activeSection, setActiveSection] = useState<Section>('Billing');
-  const appVersion: AppVersion = shop.mode;
+  const appVersion: AppVersion = shop.premiumApproved && shop.settings.workspaceMode !== 'basic' ? 'full' : 'basic';
   const swipeStart = useRef<{ x: number; y: number } | null>(null);
-  const [catalog, setCatalog] = useState<Product[]>(() => shop.catalog);
-  const [sales, setSales] = useState<Sale[]>(() => shop.sales as Sale[]);
-  const [settings, setSettings] = useState<ShopSettings>(() => ({ ...seedSettings, ...shop.settings, upiId: '', paymentQrs: Array.isArray(shop.settings.paymentQrs) ? shop.settings.paymentQrs as PaymentQR[] : [] } as ShopSettings));
-  const [bill, setBill] = useState<BillLine[]>([]);
+  const catalog = shop.catalog;
+  const sales = shop.sales as Sale[];
+  const settings = useMemo(() => ({ ...seedSettings, ...shop.settings, upiId: '', paymentQrs: Array.isArray(shop.settings.paymentQrs) ? shop.settings.paymentQrs as PaymentQR[] : [] } as ShopSettings), [shop.settings]);
+  const setCatalog = (next: SetStateAction<Product[]>) => {
+    void updateSnapshot((previous) => ({ ...previous, catalog: typeof next === 'function' ? next(previous.catalog) : next })).catch((cause) => flash(cause instanceof Error ? cause.message : 'Could not save catalog.'));
+  };
+  const setSales = (next: SetStateAction<Sale[]>) => {
+    void updateSnapshot((previous) => ({ ...previous, sales: typeof next === 'function' ? next(previous.sales as Sale[]) : next })).catch((cause) => flash(cause instanceof Error ? cause.message : 'Could not save payments.'));
+  };
+  const setSettings = (next: SetStateAction<ShopSettings>) => {
+    void updateSnapshot((previous) => {
+      const current = { ...seedSettings, ...previous.settings } as ShopSettings;
+      return { ...previous, settings: { ...previous.settings, ...(typeof next === 'function' ? next(current) : next) } };
+    }).catch((cause) => flash(cause instanceof Error ? cause.message : 'Could not save settings.'));
+  };
+  const draftKey = `buyme-bill-draft:${shop.shopId}:${shop.email}`;
+  const [bill, applyBill] = useState<BillLine[]>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(draftKey) || '[]');
+      return Array.isArray(stored) && stored.every((line) => line && typeof line.lineId === 'string' && typeof line.productId === 'string' && typeof line.variantId === 'string' && Number.isFinite(line.qty) && Number.isFinite(line.price)) ? stored : [];
+    } catch { return []; }
+  });
+  const draftBill = useRef(bill);
+  const setBill = (next: SetStateAction<BillLine[]>) => {
+    const value = typeof next === 'function' ? next(draftBill.current) : next;
+    draftBill.current = value;
+    try { localStorage.setItem(draftKey, JSON.stringify(value)); }
+    catch { flash('This bill draft could not be stored. Keep BUYME open until payment is recorded.'); }
+    applyBill(value);
+  };
   const [search, setSearch] = useState('');
   const [mobileNav, setMobileNav] = useState(false);
   const [productModal, setProductModal] = useState<{ open: boolean; product?: Product; draft?: Product }>({ open: false });
@@ -140,17 +169,12 @@ function ShopWorkspace() {
   const [toast, setToast] = useState('');
   const [broadcastOpen, setBroadcastOpen] = useState(false);
 
-  const initialized = useRef(false);
-  const persistTimer = useRef<number | null>(null);
   useEffect(() => {
     document.documentElement.classList.toggle('dark', settings.darkMode);
-    if (!initialized.current) { initialized.current = true; return; }
-    if (persistTimer.current !== null) window.clearTimeout(persistTimer.current);
-    persistTimer.current = window.setTimeout(() => {
-      void save({ catalog, sales, settings: settings as unknown as Record<string, unknown> }).catch(() => undefined);
-    }, 350);
-    return () => { if (persistTimer.current !== null) window.clearTimeout(persistTimer.current); };
-  }, [catalog, sales, settings, save]);
+  }, [settings.darkMode]);
+  useEffect(() => {
+    if (appVersion === 'basic' && (activeSection === 'Notifications' || activeSection === 'Broadcast')) setActiveSection('Billing');
+  }, [appVersion, activeSection]);
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(''), 2800);
@@ -272,21 +296,29 @@ function ShopWorkspace() {
     return null;
   };
 
-  const completePayment = (method: PaymentMethod, paid: number, discount: number, customerName?: string, customer?: string, paymentQr?: PaymentQR) => {
+  const paymentSaving = useRef(false);
+  const completePayment = async (method: PaymentMethod, paid: number, discount: number, customerName?: string, customer?: string, paymentQr?: PaymentQR) => {
+    if (paymentSaving.current) return;
+    paymentSaving.current = true;
     const total = roundMoney(billTotal - discount);
     const createdAt = new Date().toISOString();
-    const sale: Sale = { id: `BM-${Date.now().toString().slice(-6)}`, createdAt, lines: bill, subtotal: billSubtotal, gst: billGst, discount, total, paid, paymentMethod: method, payments: method === 'Credit' || paid <= 0 ? [] : [{ method, amount: paid, createdAt }], paymentQr: method === 'UPI' ? paymentQr : undefined, customerName, customer };
-    setSales((current) => [sale, ...current]);
-    setCatalog((current) => current.map((product) => ({ ...product, variants: product.variants.map((variant) => {
+    const sale: Sale = { id: `BM-${crypto.randomUUID().toUpperCase()}`, createdAt, lines: bill, subtotal: billSubtotal, gst: billGst, discount, total, paid, paymentMethod: method, payments: method === 'Credit' || paid <= 0 ? [] : [{ method, amount: paid, createdAt }], paymentQr: method === 'UPI' ? paymentQr : undefined, customerName, customer };
+    try {
+    await updateSnapshot((previous) => ({ ...previous, sales: [sale, ...previous.sales], catalog: previous.catalog.map((product) => ({ ...product, variants: product.variants.map((variant) => {
       const sold = bill.filter((line) => line.productId === product.id && line.variantId === variant.id).reduce((sum, line) => sum + line.qty, 0);
        return sold && typeof variant.stock === 'number' ? { ...variant, stock: Math.max(0, roundQuantity(variant.stock - sold)) } : variant;
-    }) })));
+    }) })) }));
     setBill([]);
     setSearch('');
     setPaymentOpen(false);
     if (appVersion === 'full') setReceiptSale(sale);
     else setReceiptSale(null);
     flash(method === 'Credit' ? `Credit of ${money(total)} recorded` : appVersion === 'basic' ? `Payment of ${money(paid)} recorded` : 'Payment recorded. Bill is ready.');
+    } catch (cause) {
+      // Never create a second sale to retry a device-storage failure.
+      setPaymentOpen(false); setBill([]);
+      flash(cause instanceof Error ? cause.message : 'Keep BUYME open and retry saving.');
+    } finally { paymentSaving.current = false; }
   };
 
   const collectCredit = (saleId: string, method: 'Cash' | 'UPI', amount: number) => {
@@ -366,12 +398,12 @@ function ShopWorkspace() {
         </header>}
 
         <div className={`mx-auto max-w-[1480px] px-5 sm:px-8 lg:px-10 ${activeSection === 'Billing' ? 'pb-14 pt-5 sm:pt-7' : 'pb-24 pt-7 lg:pb-10'}`}>
-           <div className="mb-4 flex justify-end"><AccountBar email={shop.email} role={shop.role} mode={appVersion} saveStatus={saveStatus} onRetry={retrySave} /></div>
+           <div className="mb-4 flex flex-wrap items-center justify-end gap-3">{appVersion === 'full' && <ShopPlanAccess mode={appVersion} />}<AccountBar email={shop.email} role={shop.role} mode={appVersion} saveStatus={saveStatus} onRetry={retrySave} /></div>
    {appVersion === 'basic' && <div className="mb-5 flex flex-wrap items-center justify-between gap-3" data-testid="basic-navigation">
              <nav className="flex rounded-xl border border-border bg-card p-1" aria-label="Basic pages">
-               {(['Billing', 'Catalog'] as const).map((section) => <button key={section} type="button" onClick={() => changeSection(section)} aria-current={activeSection === section ? 'page' : undefined} className={`rounded-lg px-4 py-2 text-xs font-extrabold ${activeSection === section ? 'bg-primary text-primary-foreground' : 'text-primary'}`} data-testid={`basic-nav-${section.toLowerCase()}`}>{section}</button>)}
+               {(['Billing', 'Catalog', 'Insights', 'Settings'] as const).map((section) => <button key={section} type="button" onClick={() => changeSection(section)} aria-current={activeSection === section ? 'page' : undefined} className={`rounded-lg px-3 py-2 text-xs font-extrabold ${activeSection === section ? 'bg-primary text-primary-foreground' : 'text-primary'}`} data-testid={`basic-nav-${section.toLowerCase()}`}>{section}</button>)}
              </nav>
-              <span className="rounded-lg border border-border bg-card px-3 py-2 text-xs font-bold text-muted-foreground">{shop.premiumApproved ? 'Premium access' : 'Basic plan'}</span>
+              <ShopPlanAccess mode={appVersion} />
            </div>}
            {activeSection === 'Billing' && <BillingCalculator key={sales.length} basic={appVersion === 'basic'} products={filteredProducts} search={search} onSearch={setSearch} bill={bill} subtotal={billSubtotal} gst={billGst} total={billTotal} onAdd={addToBill} onImport={importToBill} onAdjust={adjustBill} onClear={() => { setBill([]); flash('Current bill cleared'); }} onPay={() => setPaymentOpen(true)} />}
            {appVersion === 'basic' && activeSection === 'Billing' && <BasicPaymentTotals sales={sales} />}
@@ -386,10 +418,12 @@ function ShopWorkspace() {
             </div>
           </nav>}
            {activeSection === 'Catalog' && <CatalogView catalog={catalog} basic={appVersion === 'basic'} onAdd={() => setProductModal({ open: true })} onScan={() => setScanOpen(true)} onEdit={(product) => setProductModal({ open: true, product })} />}
-            {appVersion === 'full' && activeSection === 'Insights' && <InsightsView sales={sales} catalog={catalog} onOpenBill={setReceiptSale} onCollectCredit={collectCredit} />}
+             {activeSection === 'Insights' && <InsightsView sales={sales} catalog={catalog} settings={settings} onOpenBill={(sale) => appVersion === 'full' ? setReceiptSale(sale) : flash('Individual bill receipts are available in Full. You can download a data report in Basic.')} onCollectCredit={collectCredit} />}
            {appVersion === 'full' && activeSection === 'Notifications' && <NotificationsView lowStock={lowStock} sales={sales} onGoCatalog={() => changeSection('Catalog')} />}
            {appVersion === 'full' && activeSection === 'Broadcast' && <BroadcastView settings={settings} onOpen={() => setBroadcastOpen(true)} />}
-            {appVersion === 'full' && activeSection === 'Settings' && <SettingsView settings={settings} appVersion={appVersion} onSave={(next) => { setSettings(next); flash('Shop settings saved'); }} />}
+             {activeSection === 'Settings' && <SettingsView settings={settings} sales={sales} catalog={catalog} appVersion={appVersion} onSave={(next) => {
+               void updateSnapshot((previous) => ({ ...previous, settings: { ...previous.settings, ...next, workspaceMode: previous.settings.workspaceMode } })).then(() => flash('Shop settings saved on this device')).catch((cause) => flash(cause instanceof Error ? cause.message : 'Could not save settings.'));
+             }} />}
         </div>
       </main>
 
@@ -572,10 +606,10 @@ function salePayments(sale: Sale): PaymentEntry[] {
     : [];
 }
 
-function InsightsView({ sales, catalog, onOpenBill, onCollectCredit }: { sales: Sale[]; catalog: Product[]; onOpenBill: (sale: Sale) => void; onCollectCredit: (saleId: string, method: 'Cash' | 'UPI', amount: number) => void }) {
+function InsightsView({ sales, catalog, settings, onOpenBill, onCollectCredit }: { sales: Sale[]; catalog: Product[]; settings: ShopSettings; onOpenBill: (sale: Sale) => void; onCollectCredit: (saleId: string, method: 'Cash' | 'UPI', amount: number) => void }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  type Period = 'today' | 'month' | 'yesterday' | 'last2' | 'last3' | 'custom';
+  type Period = 'today' | 'month' | 'week' | 'lastMonth' | 'year' | 'yesterday' | 'last2' | 'last3' | 'custom';
   const latestSaleDate = sales.length ? new Date(Math.max(...sales.map((sale) => new Date(sale.createdAt).getTime()))) : null;
   const [period, setPeriod] = useState<Period>(() => {
     if (!latestSaleDate) return 'today';
@@ -594,11 +628,14 @@ function InsightsView({ sales, catalog, onOpenBill, onCollectCredit }: { sales: 
     const date = latestSaleDate ?? today;
     return { from: localDateInput(date), to: localDateInput(date) };
   });
-  const periodLabels: Record<Period, string> = { today: 'Today', month: 'This month', yesterday: 'Yesterday', last2: 'Last 2 days', last3: 'Last 3 days', custom: 'Custom dates' };
+  const periodLabels: Record<Period, string> = { today: 'Today', week: 'Last 7 days', lastMonth: 'Last 30 days', year: 'Last 365 days', month: 'This month', yesterday: 'Yesterday', last2: 'Last 2 days', last3: 'Last 3 days', custom: 'Custom dates' };
   const validPeriod = period !== 'custom' || (!!customDates.from && !!customDates.to && customDates.from <= customDates.to);
   const rangeStart = period === 'custom' && validPeriod ? new Date(`${customDates.from}T00:00:00`) : new Date(today);
   const rangeEnd = period === 'custom' && validPeriod ? new Date(`${customDates.to}T00:00:00`) : new Date(today);
   if (period === 'month') rangeStart.setDate(1);
+  if (period === 'week') rangeStart.setDate(rangeStart.getDate() - 6);
+  if (period === 'lastMonth') rangeStart.setDate(rangeStart.getDate() - 29);
+  if (period === 'year') rangeStart.setDate(rangeStart.getDate() - 364);
   if (period === 'yesterday') {
     rangeStart.setDate(rangeStart.getDate() - 1);
   } else if (period === 'last2') {
@@ -609,7 +646,7 @@ function InsightsView({ sales, catalog, onOpenBill, onCollectCredit }: { sales: 
   if (period !== 'yesterday') rangeEnd.setDate(rangeEnd.getDate() + 1);
   const days: Date[] = [];
   if (validPeriod) {
-    for (let date = new Date(rangeStart); date < rangeEnd && days.length < 31; date.setDate(date.getDate() + 1)) days.push(new Date(date));
+    for (let date = new Date(rangeStart); date < rangeEnd && days.length < 32; date.setDate(date.getDate() + 1)) days.push(new Date(date));
   }
   const chartAvailable = days.length <= 31;
   const currentSales = validPeriod ? sales.filter((sale) => {
@@ -653,35 +690,10 @@ function InsightsView({ sales, catalog, onOpenBill, onCollectCredit }: { sales: 
   const trackedStock = catalog.flatMap((product) => product.variants.map((variant) => ({ product, variant }))).filter(({ variant }) => typeof variant.stock === 'number');
   const stockValue = trackedStock.reduce((sum, { variant }) => sum + variant.stock! * variant.price, 0);
   const alerts = trackedStock.filter(({ variant }) => variant.stock! <= (variant.threshold ?? 0)).slice(0, 3);
-  const downloadReport = () => {
-    if (!validPeriod) return;
-    const quote = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
-    const rows = [
-      ['BUYME report', periodLabels[period], `${localDateInput(rangeStart)} to ${localDateInput(new Date(rangeEnd.getTime() - 86_400_000))}`],
-      [],
-      ['Bills created in selected dates'],
-      ['Bill ID', 'Date', 'Customer', 'Items', 'Total', 'Collected to date', 'Balance due now', 'Payment method'],
-      ...currentSales.map((sale) => {
-        return [sale.id, new Date(sale.createdAt).toLocaleString('en-IN'), sale.customerName || sale.customer || 'Walk-in', sale.lines.map((line) => `${line.name} × ${line.qty}`).join('; '), sale.total.toFixed(2), collectedAmount(sale).toFixed(2), Math.max(0, sale.total - collectedAmount(sale)).toFixed(2), sale.paymentMethod];
-      }),
-      [],
-      ['Payments received in selected dates'],
-      ['Payment date', 'Bill ID', 'Customer', 'Method', 'Amount'],
-      ...periodPaymentEvents.map(({ sale, payment }) => [new Date(payment.createdAt).toLocaleString('en-IN'), sale.id, sale.customerName || sale.customer || 'Walk-in', payment.method, payment.amount.toFixed(2)]),
-    ];
-    const csv = rows.map((row) => row.map(quote).join(',')).join('\r\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `buyme-report-${period === 'custom' ? `${customDates.from}-to-${customDates.to}` : localDateInput(rangeStart)}.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  };
-
   return <div className="rise-in">
     <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div><p className="mb-1 text-sm font-semibold text-accent">A little clarity, every day.</p><h2 className="font-display text-[2.35rem] leading-none tracking-tight text-primary">What’s moving.</h2><p className="mt-2 text-sm text-muted-foreground">Sales and saved bills for the selected dates.</p></div>
-      <div className="flex flex-wrap items-center gap-2 self-start"><label className="flex items-center gap-2 rounded-xl border border-border bg-card px-3.5 py-2.5 text-xs font-bold text-muted-foreground"><CalendarDays size={15} /><span className="sr-only">Insights dates</span><select value={period} onChange={(event) => setPeriod(event.target.value as Period)} className="bg-transparent font-bold text-primary outline-none" data-testid="select-insights-period"><option value="today">Today</option><option value="month">This month</option><option value="yesterday">Yesterday</option><option value="last2">Last 2 days</option><option value="last3">Last 3 days</option><option value="custom">Custom dates</option></select></label><button type="button" onClick={downloadReport} disabled={!validPeriod || (!currentSales.length && !periodPaymentEvents.length)} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-40" data-testid="button-download-insights-report"><Download size={15} /> Download report</button></div>
+      <div className="flex flex-wrap items-center gap-2 self-start"><label className="flex items-center gap-2 rounded-xl border border-border bg-card px-3.5 py-2.5 text-xs font-bold text-muted-foreground"><CalendarDays size={15} /><span className="sr-only">Insights dates</span><select value={period} onChange={(event) => setPeriod(event.target.value as Period)} className="bg-transparent font-bold text-primary outline-none" data-testid="select-insights-period">{(Object.keys(periodLabels) as Period[]).map((value) => <option key={value} value={value}>{periodLabels[value]}</option>)}</select></label>{validPeriod && <ReportDownload sales={sales} catalog={catalog} settings={settings} range={{ start: rangeStart, end: rangeEnd, label: periodLabels[period] }} />}</div>
     </div>
     {period === 'custom' && <div className="mb-5 flex flex-wrap gap-3 rounded-xl border border-border bg-card p-4"><label className="text-xs font-bold">From<input type="date" value={customDates.from} onChange={(event) => setCustomDates((current) => ({ ...current, from: event.target.value }))} className="field mt-1 block" data-testid="input-bills-from" /></label><label className="text-xs font-bold">To<input type="date" value={customDates.to} onChange={(event) => setCustomDates((current) => ({ ...current, to: event.target.value }))} className="field mt-1 block" data-testid="input-bills-to" /></label></div>}
     {!validPeriod && <p role="alert" className="mb-5 text-sm font-bold text-destructive">The start date must be on or before the end date.</p>}
@@ -749,14 +761,27 @@ function BroadcastView({ settings, onOpen }: { settings: ShopSettings; onOpen: (
   return <div className="rise-in"><div className="mb-7"><p className="mb-1 text-sm font-semibold text-accent">A friendly tap on the shoulder.</p><h2 className="font-display text-[2.35rem] leading-none tracking-tight text-primary">Broadcast.</h2><p className="mt-2 text-sm text-muted-foreground">Let customers know what’s fresh, useful or worth a visit.</p></div><div className="grid gap-5 lg:grid-cols-[1fr_360px]"><section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-7"><div className="max-w-lg"><span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-chart-3/12 text-chart-3"><MessageCircleMore size={24} /></span><h3 className="mt-6 font-display text-3xl text-primary">Your customers are already listening.</h3><p className="mt-3 text-sm leading-6 text-muted-foreground">Save numbers as you go and send a thoughtful WhatsApp note when new stock arrives, prices change, or festival days are near.</p><button onClick={onOpen} className="mt-6 flex h-11 items-center gap-2 rounded-xl bg-chart-3 px-4 text-xs font-extrabold text-white hover:brightness-105" data-testid="button-start-broadcast"><Send size={16} /> Start a broadcast</button></div></section><section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)]"><p className="text-xs font-bold text-muted-foreground">Your broadcast profile</p><div className="mt-5 flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-full bg-primary/10 text-sm font-extrabold text-primary">{initials(settings.shopName)}</span><div><p className="text-sm font-extrabold">{settings.shopName}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{settings.phone}</p></div></div><div className="mt-6 rounded-xl bg-muted/50 p-3.5 text-xs leading-5 text-muted-foreground">Tip: Keep it personal and useful. A short note about fresh stock works better than a long offer list.</div></section></div></div>;
 }
 
-function SettingsView({ settings, appVersion, onSave }: { settings: ShopSettings; appVersion: AppVersion; onSave: (settings: ShopSettings) => void }) {
+function ShopPlanAccess({ mode, variant }: { mode: AppVersion; variant?: 'button' | 'settings' }) {
+  const { shop, updateSnapshot, requestFull, refresh } = useSellerShop();
+  return <PlanAccess variant={variant} mode={mode} premiumApproved={shop.premiumApproved} requestedAt={shop.upgradeRequestedAt} onChooseMode={(workspaceMode) => {
+    void updateSnapshot((previous) => ({ ...previous, settings: { ...previous.settings, workspaceMode } })).catch(() => undefined);
+  }} onRequestFull={requestFull} onRefresh={async () => { await refresh(); }} />;
+}
+
+function SettingsView({ settings, sales, catalog, appVersion, onSave }: { settings: ShopSettings; sales: Sale[]; catalog: Product[]; appVersion: AppVersion; onSave: (settings: ShopSettings) => void }) {
   const [form, setForm] = useState(settings);
-  useEffect(() => setForm(settings), [settings]);
+  const lastSaved = useRef(settings);
+  const { saveStatus } = useSellerShop();
+  useEffect(() => {
+    const previous = lastSaved.current;
+    setForm((current) => sameData(current, previous) ? settings : current);
+    lastSaved.current = settings;
+  }, [settings]);
   return <div className="rise-in">
     <div className="mb-7"><p className="text-sm font-semibold text-accent">Make it yours.</p><h2 className="font-display text-[2.35rem] leading-none text-primary">Settings.</h2></div>
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
       <section className="rounded-2xl border border-border bg-card p-5 sm:p-7">
-        <div className="border-b border-border pb-5"><h3 className="text-lg font-extrabold">Plan access</h3><p className="mt-1 text-xs text-muted-foreground">{appVersion === 'full' ? 'Premium access is approved for this shop. Full shop tools are available to everyone on the team.' : 'This shop is on Basic. The BUYME company team can approve Premium access.'}</p><span className="mt-3 inline-flex rounded-full bg-primary/10 px-3 py-1.5 text-xs font-extrabold text-primary">{appVersion === 'full' ? 'Premium' : 'Basic'}</span></div>
+        <div className="border-b border-border pb-5"><ShopPlanAccess mode={appVersion} variant="settings" /></div>
         <div className="border-b border-border pb-5"><h3 className="text-lg font-extrabold">Shop details</h3><p className="mt-1 text-xs text-muted-foreground">Shown on bills and receipts.</p><div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Shop name"><input value={form.shopName} onChange={(event) => setForm({ ...form, shopName: event.target.value })} className="field" data-testid="input-shop-name" /></Field><Field label="Phone number"><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} className="field" data-testid="input-shop-phone" /></Field></div></div>
         <div className="border-b border-border py-5"><PaymentQRManager profiles={form.paymentQrs} onChange={(paymentQrs) => setForm((current) => ({ ...current, paymentQrs }))} /></div>
         <div className="border-b border-border py-5">
@@ -766,7 +791,7 @@ function SettingsView({ settings, appVersion, onSave }: { settings: ShopSettings
         <div className="flex flex-col justify-between gap-4 pt-5 sm:flex-row sm:items-center"><div><h3 className="text-sm font-extrabold">Night mode</h3><p className="mt-1 text-xs text-muted-foreground">Easier on the eyes after sunset.</p></div><button onClick={() => setForm({ ...form, darkMode: !form.darkMode })} className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-bold" data-testid="button-toggle-theme">{form.darkMode ? <Moon size={15} /> : <Sun size={15} />} {form.darkMode ? 'Dark' : 'Light'} mode</button></div>
         <button onClick={() => onSave(form)} className="mt-7 flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-xs font-extrabold text-primary-foreground" data-testid="button-save-settings"><Check size={16} /> Save changes</button>
       </section>
-      <aside className="rounded-2xl border border-primary/15 bg-primary p-5 text-primary-foreground"><ShieldCheck size={22} className="text-sidebar-primary" /><h3 className="mt-4 text-lg font-extrabold">Private by default.</h3><p className="mt-2 text-xs leading-5 text-primary-foreground/70">Your shop data is saved to your account and shared only with this shop’s invited team. Check the recipient shown in a UPI app before you confirm payment.</p></aside>
+      <aside className="space-y-5"><ReportExport sales={sales} catalog={catalog} settings={settings} /><section className="rounded-2xl border border-primary/15 bg-primary p-5 text-primary-foreground"><ShieldCheck size={22} className="text-sidebar-primary" /><h3 className="mt-4 text-lg font-extrabold">Device + cloud storage</h3><p className="mt-2 text-xs leading-5 text-primary-foreground/80">Changes are saved to this device first, then synced to your shop’s Supabase database when internet and your signed-in session are available. Uploaded photos are also copied to Supabase and saved on this device. Conflicting edits need your choice. Do not clear browser storage or app data while changes are waiting to sync.</p><p role="status" className="mt-3 text-xs font-bold">{saveStatus}</p><p className="mt-3 text-[11px] leading-5 text-primary-foreground/70">Sign in online once on each device. Offline access uses the last approved access status; admin changes take effect when the device reconnects.</p></section></aside>
     </div>
   </div>;
 }

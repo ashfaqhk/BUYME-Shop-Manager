@@ -5,6 +5,95 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export type SellerImageSyncInputContentType = typeof SellerImageSyncInputContentType[keyof typeof SellerImageSyncInputContentType];
+
+
+export const SellerImageSyncInputContentType = {
+  'image/jpeg': 'image/jpeg',
+  'image/png': 'image/png',
+  'image/webp': 'image/webp',
+} as const;
+
+export interface SellerImageSyncInput {
+  contentType: SellerImageSyncInputContentType;
+  /**
+     * @minLength 4
+     * @maxLength 8000000
+     * @pattern ^[A-Za-z0-9+/]+={0,2}$
+     */
+  base64: string;
+}
+
+export interface SellerImageSyncResult {
+  imageUrl: string;
+}
+
+export interface CompanyAccessPatchInput {
+  premiumApproved?: boolean;
+  accessEnabled?: boolean;
+}
+
+export type SellerShopSaveInputSettings = { [key: string]: unknown };
+
+export interface SellerShopSaveInput {
+  /** New clients provide their exact assigned shop ID; optional for existing clients. */
+  shopId?: string;
+  /** @maxItems 5000 */
+  catalog: unknown[];
+  /** @maxItems 100000 */
+  sales: unknown[];
+  settings: SellerShopSaveInputSettings;
+  /** @minimum 1 */
+  revision: number;
+}
+
+export type SellerShopDocumentMode = typeof SellerShopDocumentMode[keyof typeof SellerShopDocumentMode];
+
+
+export const SellerShopDocumentMode = {
+  basic: 'basic',
+  full: 'full',
+} as const;
+
+export type SellerShopDocumentSettings = { [key: string]: unknown };
+
+export interface SellerShopDocument {
+  /** @nullable */
+  shopId: string | null;
+  shopName: string;
+  email: string;
+  role: string;
+  isCompanyAdmin: boolean;
+  premiumApproved: boolean;
+  accessEnabled: boolean;
+  /** @nullable */
+  upgradeRequestedAt: string | null;
+  mode: SellerShopDocumentMode;
+  catalog: unknown[];
+  sales: unknown[];
+  settings: SellerShopDocumentSettings;
+  revision: number;
+  isNew?: boolean;
+}
+
+export interface ShopAccessDocument {
+  id: string;
+  premiumApproved: boolean;
+  accessEnabled: boolean;
+  /** @nullable */
+  upgradeRequestedAt: string | null;
+}
+
+export type CompanySellerDocumentMembersItem = {
+  email: string;
+  role: string;
+};
+
+export type CompanySellerDocument = ShopAccessDocument & {
+  name: string;
+  members: CompanySellerDocumentMembersItem[];
+};
+
 export interface HealthStatus {
   status: string;
 }
@@ -53,4 +142,8 @@ export interface ProductPhotoSuggestions {
   /** @nullable */
   quantity: number | null;
 }
+
+export type ListCompanySellerAccess200 = {
+  sellers: CompanySellerDocument[];
+};
 
