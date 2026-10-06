@@ -9,20 +9,6 @@ import * as zod from 'zod';
 
 
 /**
- * Public no-store diagnostics, not a toggle. Verifies a real connection's read-only setting. Operators must inventory and drain every instance before relying on the freeze.
- * @summary Read this API instance's database recovery freeze status
- */
-export const GetMaintenanceStatusResponse = zod.object({
-  "instanceId": zod.string(),
-  "maintenance": zod.boolean(),
-  "databaseReadOnly": zod.boolean().nullable(),
-  "verified": zod.boolean(),
-  "retryAfterSeconds": zod.number().int().optional(),
-  "error": zod.string().optional()
-})
-
-
-/**
  * Verified member with enabled access required. Validated JPEG, PNG or WebP bytes, at most 6 MB. Content addressing makes identical-image retries idempotent within a shop.
  * @summary Store an uploaded image in the assigned shop's Supabase database
  */

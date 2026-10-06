@@ -11,7 +11,6 @@ import { AccountBar, BuymeAccess, uploadSellerPhoto, useSellerShop } from './Sel
 import PlanAccess from './PlanAccess';
 import ReportExport, { ReportDownload } from './ReportExport';
 import { sameData } from './shop-merge';
-import { canChooseWorkspace, resolveWorkspaceMode } from './counter-policy';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -128,9 +127,9 @@ function initials(name: string) {
 
 function ShopWorkspace() {
   const { shop, updateSnapshot, saveStatus, retrySave } = useSellerShop();
-  const [selectedSection, setActiveSection] = useState<Section>('Billing');
-  const appVersion: AppVersion = resolveWorkspaceMode(shop.premiumApproved, shop.settings.workspaceMode);
-  const activeSection = appVersion === 'basic' ? 'Billing' : selectedSection;
+  const [activeSection, setActiveSection] = useState<Section>('Billing');
+  const appVersion: AppVersion = shop.premiumApproved && shop.settings.workspaceMode !== 'basic' ? 'full' : 'basic';
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
   const catalog = shop.catalog;
   const sales = shop.sales as Sale[];
   const settings = useMemo(() => ({ ...seedSettings, ...shop.settings, upiId: '', paymentQrs: Array.isArray(shop.settings.paymentQrs) ? shop.settings.paymentQrs as PaymentQR[] : [] } as ShopSettings), [shop.settings]);
@@ -174,12 +173,8 @@ function ShopWorkspace() {
     document.documentElement.classList.toggle('dark', settings.darkMode);
   }, [settings.darkMode]);
   useEffect(() => {
-    if (appVersion === 'basic') {
-      setActiveSection('Billing'); setMobileNav(false);
-      setScanOpen(false); setBroadcastOpen(false);
-      setProductModal({ open: false }); setReceiptSale(null);
-    }
-  }, [appVersion]);
+    if (appVersion === 'basic' && (activeSection === 'Notifications' || activeSection === 'Broadcast')) setActiveSection('Billing');
+  }, [appVersion, activeSection]);
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(''), 2800);
@@ -195,7 +190,7 @@ function ShopWorkspace() {
   ), [catalog, search]);
 
   const flash = (message: string) => setToast(message);
-   const changeSection = (section: Section) => { setActiveSection(appVersion === 'basic' ? 'Billing' : section); setMobileNav(false); };
+  const changeSection = (section: Section) => { setActiveSection(section); setMobileNav(false); };
   const addToBill = (product: Product, variant: Variant, quantity = 1) => {
     if (!validQuantity(quantity)) return false;
     const alreadyAdded = bill.filter((line) => line.productId === product.id && line.variantId === variant.id).reduce((sum, line) => sum + line.qty, 0);
@@ -377,7 +372,18 @@ function ShopWorkspace() {
       </aside>}
 
        {appVersion === 'full' && activeSection !== 'Billing' && mobileNav && <button aria-label="Close menu" className="fixed inset-0 z-30 bg-foreground/30 lg:hidden" onClick={() => setMobileNav(false)} data-testid="button-menu-backdrop" />}
-        <main className={`min-h-[100dvh] ${appVersion === 'full' && activeSection !== 'Billing' ? 'lg:pl-[264px]' : ''}`}>
+       <main className={`min-h-[100dvh] ${appVersion === 'full' && activeSection !== 'Billing' ? 'lg:pl-[264px]' : ''}`}
+         onTouchStart={(event) => { if (appVersion === 'basic') swipeStart.current = { x: event.touches[0].clientX, y: event.touches[0].clientY }; }}
+         onTouchEnd={(event) => {
+           if (appVersion !== 'basic' || !swipeStart.current || paymentOpen || productModal.open) return;
+           const dx = event.changedTouches[0].clientX - swipeStart.current.x;
+           const dy = event.changedTouches[0].clientY - swipeStart.current.y;
+           swipeStart.current = null;
+           if (Math.abs(dx) > 85 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+             if (dx < 0 && activeSection === 'Billing') changeSection('Catalog');
+             else if (dx > 0 && activeSection === 'Catalog') changeSection('Billing');
+           }
+         }}>
          {appVersion === 'full' && activeSection !== 'Billing' && <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-md sm:px-8 lg:px-10">
           <div className="flex items-center gap-3">
             <button className="rounded-xl border border-border bg-card p-2.5 lg:hidden" onClick={() => setMobileNav(true)} data-testid="button-open-navigation"><Menu size={18} /></button>
@@ -393,11 +399,14 @@ function ShopWorkspace() {
 
         <div className={`mx-auto max-w-[1480px] px-5 sm:px-8 lg:px-10 ${activeSection === 'Billing' ? 'pb-14 pt-5 sm:pt-7' : 'pb-24 pt-7 lg:pb-10'}`}>
            <div className="mb-4 flex flex-wrap items-center justify-end gap-3">{appVersion === 'full' && <ShopPlanAccess mode={appVersion} />}<AccountBar email={shop.email} role={shop.role} mode={appVersion} saveStatus={saveStatus} onRetry={retrySave} /></div>
-   {appVersion === 'basic' && <div className="mb-5 flex justify-end" data-testid="basic-navigation">
+   {appVersion === 'basic' && <div className="mb-5 flex flex-wrap items-center justify-between gap-3" data-testid="basic-navigation">
+             <nav className="flex rounded-xl border border-border bg-card p-1" aria-label="Basic pages">
+               {(['Billing', 'Catalog', 'Insights', 'Settings'] as const).map((section) => <button key={section} type="button" onClick={() => changeSection(section)} aria-current={activeSection === section ? 'page' : undefined} className={`rounded-lg px-3 py-2 text-xs font-extrabold ${activeSection === section ? 'bg-primary text-primary-foreground' : 'text-primary'}`} data-testid={`basic-nav-${section.toLowerCase()}`}>{section}</button>)}
+             </nav>
               <ShopPlanAccess mode={appVersion} />
            </div>}
            {activeSection === 'Billing' && <BillingCalculator key={sales.length} basic={appVersion === 'basic'} products={filteredProducts} search={search} onSearch={setSearch} bill={bill} subtotal={billSubtotal} gst={billGst} total={billTotal} onAdd={addToBill} onImport={importToBill} onAdjust={adjustBill} onClear={() => { setBill([]); flash('Current bill cleared'); }} onPay={() => setPaymentOpen(true)} />}
-            {activeSection === 'Billing' && <TodayPaymentTotals sales={sales} basic={appVersion === 'basic'} />}
+           {appVersion === 'basic' && activeSection === 'Billing' && <BasicPaymentTotals sales={sales} />}
            {appVersion === 'full' && activeSection === 'Billing' && <nav className="mt-20 border-t border-border pt-8" aria-label="More shop sections" data-testid="nav-billing-footer">
             <p className="mb-4 text-xs font-bold uppercase tracking-widest text-muted-foreground">More from your shop</p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -408,11 +417,11 @@ function ShopWorkspace() {
               <button type="button" onClick={() => { changeSection('Settings'); window.scrollTo({ top: 0, behavior: 'instant' }); }} className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-left text-sm font-bold text-primary hover:border-primary/40" data-testid="footer-nav-settings"><Settings2 size={17} />Settings</button>
             </div>
           </nav>}
-           {appVersion === 'full' && activeSection === 'Catalog' && <CatalogView catalog={catalog} basic={false} onAdd={() => setProductModal({ open: true })} onScan={() => setScanOpen(true)} onEdit={(product) => setProductModal({ open: true, product })} />}
-              {appVersion === 'full' && activeSection === 'Insights' && <InsightsView sales={sales} catalog={catalog} settings={settings} onOpenBill={setReceiptSale} onCollectCredit={collectCredit} />}
+           {activeSection === 'Catalog' && <CatalogView catalog={catalog} basic={appVersion === 'basic'} onAdd={() => setProductModal({ open: true })} onScan={() => setScanOpen(true)} onEdit={(product) => setProductModal({ open: true, product })} />}
+             {activeSection === 'Insights' && <InsightsView sales={sales} catalog={catalog} settings={settings} onOpenBill={(sale) => appVersion === 'full' ? setReceiptSale(sale) : flash('Individual bill receipts are available in Full. You can download a data report in Basic.')} onCollectCredit={collectCredit} />}
            {appVersion === 'full' && activeSection === 'Notifications' && <NotificationsView lowStock={lowStock} sales={sales} onGoCatalog={() => changeSection('Catalog')} />}
            {appVersion === 'full' && activeSection === 'Broadcast' && <BroadcastView settings={settings} onOpen={() => setBroadcastOpen(true)} />}
-              {appVersion === 'full' && activeSection === 'Settings' && <SettingsView settings={settings} sales={sales} catalog={catalog} appVersion={appVersion} onSave={(next) => {
+             {activeSection === 'Settings' && <SettingsView settings={settings} sales={sales} catalog={catalog} appVersion={appVersion} onSave={(next) => {
                void updateSnapshot((previous) => ({ ...previous, settings: { ...previous.settings, ...next, workspaceMode: previous.settings.workspaceMode } })).then(() => flash('Shop settings saved on this device')).catch((cause) => flash(cause instanceof Error ? cause.message : 'Could not save settings.'));
              }} />}
         </div>
@@ -424,13 +433,13 @@ function ShopWorkspace() {
         </div>
       </div>}
 
-      {appVersion === 'full' && scanOpen && <CatalogScanDialog catalog={catalog} onClose={() => setScanOpen(false)} onRestock={restockFromScan} onCreateDraft={(draft) => { setScanOpen(false); setProductModal({ open: true, draft }); }} onEditDraft={(productId, draft) => { const product = catalog.find((entry) => entry.id === productId); if (!product) return; setScanOpen(false); setProductModal({ open: true, product, draft: { ...draft, id: product.id } }); }} />}
-        {appVersion === 'full' && productModal.open && <ProductModal basic={false} product={productModal.product} draft={productModal.draft} onClose={() => setProductModal({ open: false })} onSave={saveProduct} onDelete={deleteProduct} />}
+      {scanOpen && <CatalogScanDialog catalog={catalog} onClose={() => setScanOpen(false)} onRestock={restockFromScan} onCreateDraft={(draft) => { setScanOpen(false); setProductModal({ open: true, draft }); }} onEditDraft={(productId, draft) => { const product = catalog.find((entry) => entry.id === productId); if (!product) return; setScanOpen(false); setProductModal({ open: true, product, draft: { ...draft, id: product.id } }); }} />}
+       {productModal.open && <ProductModal basic={appVersion === 'basic'} product={productModal.product} draft={productModal.draft} onClose={() => setProductModal({ open: false })} onSave={saveProduct} onDelete={deleteProduct} />}
        {paymentOpen && (appVersion === 'basic'
           ? <BasicPaymentModal total={billTotal} onClose={() => setPaymentOpen(false)} onComplete={(method) => completePayment(method, method === 'Credit' ? 0 : billTotal, 0)} />
          : <PaymentModal basic={false} total={billTotal} subtotal={billSubtotal} gst={billGst} lines={bill} settings={settings} onSaveQR={(profile) => setSettings((current) => ({ ...current, paymentQrs: [...current.paymentQrs, profile] }))} onClose={() => setPaymentOpen(false)} onComplete={completePayment} />)}
        {appVersion === 'full' && receiptSale && <ReceiptModal sale={receiptSale} settings={settings} basic={false} onClose={() => setReceiptSale(null)} />}
-      {appVersion === 'full' && broadcastOpen && <BroadcastModal settings={settings} onClose={() => setBroadcastOpen(false)} onDone={(message) => { setBroadcastOpen(false); flash(message); }} />}
+      {broadcastOpen && <BroadcastModal settings={settings} onClose={() => setBroadcastOpen(false)} onDone={(message) => { setBroadcastOpen(false); flash(message); }} />}
       {toast && <div className="fixed bottom-20 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-2 rounded-xl bg-sidebar px-4 py-3 text-xs font-bold text-sidebar-foreground shadow-[0_12px_35px_rgba(36,31,61,.22)] lg:bottom-7" data-testid="status-toast"><CircleCheck size={16} className="text-sidebar-primary" />{toast}</div>}
     </div>
   );
@@ -755,7 +764,6 @@ function BroadcastView({ settings, onOpen }: { settings: ShopSettings; onOpen: (
 function ShopPlanAccess({ mode, variant }: { mode: AppVersion; variant?: 'button' | 'settings' }) {
   const { shop, updateSnapshot, requestFull, refresh } = useSellerShop();
   return <PlanAccess variant={variant} mode={mode} premiumApproved={shop.premiumApproved} requestedAt={shop.upgradeRequestedAt} onChooseMode={(workspaceMode) => {
-    if (!canChooseWorkspace(shop.premiumApproved, workspaceMode)) return;
     void updateSnapshot((previous) => ({ ...previous, settings: { ...previous.settings, workspaceMode } })).catch(() => undefined);
   }} onRequestFull={requestFull} onRefresh={async () => { await refresh(); }} />;
 }
@@ -974,15 +982,15 @@ function BasicPaymentModal({ total, onClose, onComplete }: {
   </Modal>;
 }
 
-function TodayPaymentTotals({ sales, basic }: { sales: Sale[]; basic: boolean }) {
+function BasicPaymentTotals({ sales }: { sales: Sale[] }) {
   const today = localDateInput(new Date());
   const todaysSales = sales.filter((sale) => localDateInput(new Date(sale.createdAt)) === today);
   const todaysPayments = sales.flatMap(salePayments).filter((entry) => localDateInput(new Date(entry.createdAt)) === today);
   const cash = todaysPayments.filter((entry) => entry.method === 'Cash').reduce((sum, entry) => sum + entry.amount, 0);
   const upi = todaysPayments.filter((entry) => entry.method === 'UPI').reduce((sum, entry) => sum + entry.amount, 0);
   const credit = sales.reduce((sum, sale) => sum + Math.max(0, sale.total - collectedAmount(sale)), 0);
-  return <section className="mt-5 rounded-2xl border border-border bg-card p-5" aria-label="Today’s payment totals" data-testid="today-payment-totals">
-    <div className="flex items-center justify-between"><div><h3 className="font-extrabold">Today’s payment totals</h3><p className="mt-1 text-xs text-muted-foreground">{basic ? 'Your daily summary. Full bill history is available in Premium.' : 'Payments received today, including collections on earlier bills.'}</p></div><span className="text-[10px] font-bold text-muted-foreground">{todaysSales.length} bills</span></div>
+  return <section className="mt-5 rounded-2xl border border-border bg-card p-5" aria-label="Today’s payment totals" data-testid="basic-payment-totals">
+    <div className="flex items-center justify-between"><div><h3 className="font-extrabold">Today’s payment totals</h3><p className="mt-1 text-xs text-muted-foreground">Summary only in Basic; full bill history is available in Full.</p></div><span className="text-[10px] font-bold text-muted-foreground">{todaysSales.length} bills</span></div>
     <div className="mt-4 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-muted/40 p-3"><p className="text-[10px] font-bold text-muted-foreground">UPI today</p><p className="mt-1 text-sm font-extrabold">{money(upi)}</p></div><div className="rounded-xl bg-muted/40 p-3"><p className="text-[10px] font-bold text-muted-foreground">Cash today</p><p className="mt-1 text-sm font-extrabold">{money(cash)}</p></div><div className="rounded-xl bg-accent/10 p-3"><p className="text-[10px] font-bold text-accent">Credit due now</p><p className="mt-1 text-sm font-extrabold">{money(credit)}</p></div></div>
   </section>;
 }

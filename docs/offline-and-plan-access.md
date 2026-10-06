@@ -2,13 +2,9 @@
 
 ## Basic to Full
 
-Click **Premium access**, then **Request Full access**. This records a request; it does not grant access automatically. The company administrator signs in using the configured, verified company email, opens **Seller access**, searches for the seller's email, and selects **Approve Full**. The seller can use **Check status** or **Sync now**; periodic refresh also updates access without reloading the workspace.
+Click **Basic plan**, then **Request Full access**. This records a request; it does not grant access automatically. The company administrator signs in using the configured, verified company email, opens **Seller access**, searches for the seller's email, and selects **Approve Full**. The seller can use **Check status** or **Sync now**; periodic refresh also updates access without reloading the workspace.
 
-Approved sellers can choose Basic or Full (Premium) from the same plan control. **Go to Premium** in Basic opens the control to return to Premium. This changes the interface preference, not approval, and preserves the same catalog, sales, stock, payment profiles and draft bill. Basic-only accounts cannot enter Premium through a saved preference or the mode controls.
-
-Basic shows only the billing counter, today's UPI/Cash/credit totals and Premium access. It has no Insights or Settings pages and no swipe navigation into advanced sections. Catalog and the other workspace sections are below Premium's counter. Premium also shows today's payment totals. Basic checkout does not create individual invoice/receipt PDFs or payment QRs; data-report PDFs are accessed from Premium Settings and Insights.
-
-With Quick Add selected, a single-type product adds its normal default quantity immediately, including weighted units. Products with multiple defined types open a type/quantity selector, even if only one type is currently stocked. Long-press and Enter quantity still allow editing amounts; stock checks remain in effect.
+Approved sellers can choose Basic or Full from the same plan control. This changes the interface preference, not approval, and preserves the same catalog, sales, stock and payment profiles. Basic checkout does not create individual invoice/receipt PDFs or payment QRs. Both versions provide Settings and Insights data reports.
 
 The administrator can downgrade a shop to Basic or pause/restore its access. Changes apply to every member of that shop. Pausing does not delete data. Paused accounts cannot save, upload images, invite members or retrieve cloud shop contents; the account page returns only access metadata.
 

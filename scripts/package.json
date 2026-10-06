@@ -6,7 +6,6 @@
   "scripts": {
     "hello": "tsx ./src/hello.ts",
     "recovery": "tsx ../lib/db/src/recovery/cli.ts",
-    "verify:maintenance": "node ./src/verify-maintenance.mjs",
     "test:recovery": "tsx --test ../lib/db/src/recovery/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

@@ -1,7 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "./schema";
-import { applicationConnectionString } from "./maintenance";
 
 const { Pool } = pg;
 
@@ -16,8 +15,7 @@ if (!databaseUrl) {
   );
 }
 
-export const pool = new Pool({ connectionString: applicationConnectionString(databaseUrl) });
+export const pool = new Pool({ connectionString: databaseUrl });
 export const db = drizzle(pool, { schema });
 
 export * from "./schema";
-export * from "./maintenance";

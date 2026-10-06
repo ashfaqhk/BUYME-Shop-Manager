@@ -29,7 +29,6 @@ export default function PlanAccess({ variant = "button", mode, premiumApproved, 
   const descId = useId();
   const waiting = !premiumApproved && Boolean(requestedAt);
   const label = premiumApproved ? (mode === "full" ? "Premium plan" : "Basic view") : "Basic plan";
-  const controlLabel = mode === "basic" ? (premiumApproved ? "Go to Premium" : "Premium access") : "Premium · switch view";
 
   const close = useCallback(() => { setOpen(false); setError(""); setSuccess(""); window.setTimeout(() => triggerRef.current?.focus(), 0); }, []);
 
@@ -62,7 +61,7 @@ export default function PlanAccess({ variant = "button", mode, premiumApproved, 
 
   const control = <button ref={triggerRef} type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" aria-expanded={open} data-testid="button-plan-access"
     className={variant === "settings" ? "rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" : "rounded-lg border border-border bg-card px-3 py-2 text-xs font-bold text-muted-foreground hover:border-primary/40 hover:text-primary"}>
-    {variant === "settings" ? "Manage plan" : waiting ? `${controlLabel} · request pending` : controlLabel}
+    {variant === "settings" ? "Manage plan" : waiting ? `${label} · request pending` : label}
   </button>;
 
   return <>
@@ -71,7 +70,7 @@ export default function PlanAccess({ variant = "button", mode, premiumApproved, 
         <p className="text-xs font-bold uppercase tracking-widest text-primary">Plan</p>
         <h3 className="mt-2 text-lg font-extrabold">{premiumApproved ? "Premium access approved" : "Basic plan"}</h3>
         <p className="mt-1 text-sm leading-6 text-muted-foreground">
-          {premiumApproved ? `You are using the ${mode === "full" ? "Premium" : "Basic"} interface. Your shop data is the same in both.` : waiting ? `Full access requested${when(requestedAt) ? ` on ${when(requestedAt)}` : ""}. Waiting for BUYME approval.` : "Basic is the billing counter with today’s totals. Premium adds catalog, settings, insights, alerts, broadcast and bill receipts."}
+          {premiumApproved ? `You are using the ${mode === "full" ? "Full" : "Basic"} interface. Your shop data is the same in both.` : waiting ? `Full access requested${when(requestedAt) ? ` on ${when(requestedAt)}` : ""}. Waiting for BUYME approval.` : "Basic covers billing, your catalog and PDF data reports. Full adds alerts, broadcast and individual bill receipts."}
         </p>
         <div className="mt-4">{control}</div>
       </section>
@@ -81,9 +80,9 @@ export default function PlanAccess({ variant = "button", mode, premiumApproved, 
         <p className="text-xs font-bold uppercase tracking-widest text-primary">Your plan</p>
         <h2 id={titleId} className="mt-2 text-xl font-extrabold">{premiumApproved ? "Choose your interface" : "Basic plan"}</h2>
         <div id={descId} className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
-          <p><strong className="text-foreground">Basic</strong> gives you the billing counter, payments and today’s totals.</p>
-          <p><strong className="text-foreground">Premium</strong> adds catalog, settings, insights, PDF reports, stock alerts, customer broadcast and individual printable bills. Approval is given by the BUYME company team and applies to everyone in your shop.</p>
-          <p>Approved Premium users can use Basic at any time and return here to Premium. Basic-only users need company approval first.</p>
+          <p><strong className="text-foreground">Basic</strong> gives you billing, payments and your product catalog.</p>
+          <p><strong className="text-foreground">Full</strong> adds stock alerts, customer broadcast and individual printable bills. Approval is given by the BUYME company team and applies to everyone in your shop.</p>
+          <p>Both versions include PDF data reports from Settings and Insights.</p>
           {premiumApproved && <p>Switching the interface does not change your approval or any shop data.</p>}
           {waiting && <p data-testid="status-request-waiting" className="rounded-lg bg-muted p-3 text-foreground">Request sent{when(requestedAt) ? ` on ${when(requestedAt)}` : ""}. Waiting for approval. Use Check status to see if it has been approved.</p>}
         </div>

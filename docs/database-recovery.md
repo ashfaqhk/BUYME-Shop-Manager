@@ -46,88 +46,15 @@ an explicit prerequisite, not something `apply` fixes.
    logs, Git, documentation, or chat. `SUPABASE_DATABASE_URL` remains the source.
    Run from an authorized environment able to reach both databases; if the retained
    production target is unreachable, stop rather than use another database.
-4. Follow the **maintenance activation and verification** steps below for every API
-   instance. Stop background jobs, manual integrations and other direct writers to
-   **both** databases. Development and production share Supabase, so freezing only
-   production is insufficient. Drain old requests/connections and keep maintenance
-   active through routing verification. A CLI confirmation is not a maintenance switch.
+4. Stop production, development previews, background jobs, manual integrations and
+   any other writers to **both** databases. Development and production currently
+   share Supabase, so stopping only production is insufficient. Drain in-flight
+   requests/connections and keep maintenance in effect through routing verification.
+   Restrict direct database writers too. A CLI confirmation is not a maintenance switch.
 5. Retain a separately secured full database backup of both databases. The tool
    also saves application snapshots and an extra before-apply target snapshot.
 
 Nothing in this task deploys, pauses services, sets credentials or changes live data.
-
-### Maintenance activation and verification (required before capture)
-
-`BUYME_MAINTENANCE_MODE=true` is a **server-only**, operator-controlled environment
-setting. Use the secure environment configuration workflow in both development and
-production, including all other environments connected to the source/target.
-There is no HTTP toggle, request-header override, company-admin bypass or client flag.
-Unset or exactly `false` is normal operation; any other value refuses startup.
-Do not include this setting in a `VITE_` variable. Do not activate a live freeze
-without approval for downtime.
-
-1. Inventory **every** API process/replica, preview and deployment from the runtime
-   control plane. Stop or freeze each writer. Restart/redeploy all API instances
-   after setting `true`; environment changes do not update a running process.
-   New instances must inherit the same setting. Drain/terminate old replicas and
-   in-flight work (including already-reserved AI requests) before capture. Record
-   evidence that old writer connections have ended. Signed image upload URLs
-   issued earlier may still write App Storage; let them expire or revoke access
-   if object storage must also be frozen. This switch freezes database writes,
-   not previously issued storage capabilities.
-2. Each maintenance-mode database pool requests PostgreSQL
-   `default_transaction_read_only=on`. This protects Drizzle and direct pool SQL,
-   including writes hidden in GETs. No table or data is changed to activate it.
-   If the database proxy rejects startup options, use a supported direct/session
-   connection or stop that instance; **never remove the read-only option to make
-   verification pass**. This is an application safety measure, not protection
-   against a DBA/direct SQL client deliberately changing session settings.
-3. Obtain each restarted process's `instanceId` from `GET /api/maintenance` using
-   instance-specific routing. The response is no-store and contains only the
-   random boot ID, maintenance flag and a real database read-only check. It exposes
-   no credentials, addresses or shop data. Require HTTP 200 and `maintenance`,
-   `databaseReadOnly`, `verified` all `true`. A connection failure or writable
-   connection is unverified and must stop recovery. Health alone is not proof.
-4. Save a private JSON inventory with one entry for **each running boot ID**, e.g.:
-
-   ```json
-   [
-     { "apiBaseUrl": "https://development.example/api", "instanceId": "actual-development-boot-id" },
-     { "apiBaseUrl": "https://production-instance.example/api", "instanceId": "actual-production-boot-id" }
-   ]
-   ```
-
-   Use actual routed API base URLs (including any preview prefix). Do not put
-   authentication tokens or credentials in URLs or this file. Then run:
-
-   ```sh
-   pnpm --filter @workspace/scripts verify:maintenance recovery-private/instances.json
-   ```
-
-   It checks each expected boot ID, real read-only state, and unauthenticated
-   mutation probes for shop saves (catalog/billing/settings), upgrade requests,
-   company approvals/access, invitations, image uploads/metadata and both AI scans.
-   Each must return HTTP 503, code `BUYME_MAINTENANCE`, and `Retry-After: 60`
-   **before** any side effect. Hidden GET shop provisioning is refused when a
-   membership/shop must be created; existing memberships remain readable.
-   Image reads continue without caching bytes into the database. The scan
-   reservation helper also rejects maintenance before issuing its upsert.
-5. A successful script covers **only the supplied inventory**. Repeated requests
-   to a shared load balancer cannot prove all replicas are frozen. If individual
-   replicas cannot be identified/routed, or the runtime cannot prove old replicas
-   drained, stop all application writers instead and do not claim a verified
-   live freeze. Secure direct database writers independently; the switch does not
-   freeze recovery CLI connections, migrations or third-party clients.
-
-Clients keep device edits and unsynced images; a 503 is not acknowledgement of a
-cloud save. Retry after maintenance; do not clear local storage. Sixty seconds
-is a retry interval, **not** an estimated recovery completion time.
-
-Keep the setting `true` during target routing and publish/restart verification.
-Repeat the full inventory check after any deployment/routing change. Reopen only
-after the verification and owner/staff checks in step 5 pass: set `false` (or
-unset), restart all intended writers, confirm the new boot IDs report maintenance
-off, then allow syncing. Do not reopen development on an unintended database.
 
 ## 2. Capture consistent read-only snapshots and make a plan
 

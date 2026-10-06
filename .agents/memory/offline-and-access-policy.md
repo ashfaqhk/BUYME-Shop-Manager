@@ -15,7 +15,7 @@ The company administrator selling BUYME controls existing users' online access b
 
 **How to apply:** Enforce approval and paused access on the server. Offline use must retain the last confirmed access state; admin revocations cannot instantly reach a disconnected device. Re-check access before syncing on reconnection.
 
-Users can download recent day/week/month/year data PDFs from Settings and Insights. These pages are now Premium-only because the user subsequently asked to hide them in Basic. Recent month/year reports use explicitly labelled rolling 30/365-day windows including today; custom dates are also supported. Current stock and current balances must not be presented as historical period-end values.
+Users can download recent day/week/month/year data PDFs from both Settings and Insights. Recent month/year reports use explicitly labelled rolling 30/365-day windows including today; custom dates are also supported. Current stock and current balances must not be presented as historical period-end values.
 
 **Why:** The user requested recent one-day, one-week, one-month and one-year data. Explicit windows avoid ambiguous “month” and “year” coverage.
 

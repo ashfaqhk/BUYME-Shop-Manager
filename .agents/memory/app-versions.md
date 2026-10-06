@@ -3,14 +3,8 @@ name: Basic and Full versions
 description: Why BUYME uses one set of shop data across its simplified and full interfaces
 ---
 
-Basic and Full (Premium) are two views of the same shop, not separate accounts or datasets. Basic is the simplified billing counter with today's payment totals and a control for Premium access. Do not show Insights or Settings in Basic. Premium has Catalog and the other sections below the counter, and also today's payment totals. Basic checkout must not generate an individual bill, receipt PDF, or in-app QR. Keep saved shop data and payment profiles when switching.
+Basic and Full are two views of the same shop, not separate accounts or datasets. Basic's checkout shows the amount due and records a confirmed payment, but must not generate an individual bill, receipt PDF, or in-app QR. Account data-report PDFs from Settings and Insights are allowed in both versions. Keep saved Full-mode data and existing payment profiles when switching.
 
-**Why:** The user explicitly asked to remove Insights and Settings from Basic, keep a basic view with a way back to Premium, place Catalog and other sections below Premium, and show Basic's daily payment totals in Full too. This supersedes the earlier decision to show report pages in Basic.
+**Why:** Basic is meant for a tutorial and quick counter use. Separating the data would make a version switch appear to lose work. The user subsequently asked for recent data PDFs from both Settings and Insights, distinct from checkout invoices.
 
-**How to apply:** Derive the rendered view from the company's approval AND the saved interface preference. Premium-approved users may choose Basic anytime and return to Premium; Basic-only users cannot enter Premium without approval. Switching views must never change approval or discard a draft bill. Redirect to the counter and close Premium-only dialogs when entering Basic.
-
-Quick Add should open further selection if a material has different types; otherwise tapping adds it directly.
-
-**Why:** The user explicitly requested selection only for materials with different types.
-
-**How to apply:** Count all defined types, not just currently stocked types. Preserve normal per-unit default quantities, stock checks and long-press/manual quantity editing.
+**How to apply:** When adding features to either version, preserve shared sales/catalog history and decide explicitly whether the feature should be shown in Basic. Basic catalog entry should be possible without a product photo; show low stock there. Full retains the complete bill/PDF flow.

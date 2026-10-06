@@ -5,36 +5,6 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-export type RecoveryRetryMessageCode = typeof RecoveryRetryMessageCode[keyof typeof RecoveryRetryMessageCode];
-
-
-export const RecoveryRetryMessageCode = {
-  BUYME_MAINTENANCE: 'BUYME_MAINTENANCE',
-} as const;
-
-export type RecoveryRetryMessageRetryAfterSeconds = typeof RecoveryRetryMessageRetryAfterSeconds[keyof typeof RecoveryRetryMessageRetryAfterSeconds];
-
-
-export const RecoveryRetryMessageRetryAfterSeconds = {
-  NUMBER_60: 60,
-} as const;
-
-export interface RecoveryRetryMessage {
-  code: RecoveryRetryMessageCode;
-  error: string;
-  retryAfterSeconds: RecoveryRetryMessageRetryAfterSeconds;
-}
-
-export interface DatabaseFreezeStatus {
-  instanceId: string;
-  maintenance: boolean;
-  /** @nullable */
-  databaseReadOnly: boolean | null;
-  verified: boolean;
-  retryAfterSeconds?: number;
-  error?: string;
-}
-
 export type SellerImageSyncInputContentType = typeof SellerImageSyncInputContentType[keyof typeof SellerImageSyncInputContentType];
 
 
@@ -172,11 +142,6 @@ export interface ProductPhotoSuggestions {
   /** @nullable */
   quantity: number | null;
 }
-
-/**
- * Database recovery freeze. Keep device copies and retry; no write is acknowledged. Also applies to GET shop when provisioning a new shop or membership is required.
- */
-export type WriteMaintenanceResponse = RecoveryRetryMessage;
 
 export type ListCompanySellerAccess200 = {
   sellers: CompanySellerDocument[];

@@ -15,25 +15,6 @@ tags:
   - name: catalog
     description: Product photo recognition
 paths:
-  /maintenance:
-    get:
-      operationId: getMaintenanceStatus
-      tags: [health]
-      summary: Read this API instance's database recovery freeze status
-      description: Public no-store diagnostics, not a toggle. Verifies a real connection's read-only setting. Operators must inventory and drain every instance before relying on the freeze.
-      responses:
-        "200":
-          description: Instance status (verified is true only during a confirmed freeze)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatabaseFreezeStatus"
-        "503":
-          description: Maintenance connection is writable or cannot be verified; stop recovery
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatabaseFreezeStatus"
   /shop/images:
     post:
       operationId: syncSellerImage
@@ -61,8 +42,6 @@ paths:
           description: Shop access paused
         "404":
           description: No assigned shop
-        "503":
-          $ref: "#/components/responses/WriteMaintenance"
   /shop:
     get:
       operationId: getSellerShop
@@ -80,8 +59,6 @@ paths:
           description: Verified sign-in required
         "403":
           description: Shop assignment unavailable
-        "503":
-          $ref: "#/components/responses/WriteMaintenance"
     put:
       operationId: saveSellerShop
       tags: [shop]
@@ -110,8 +87,6 @@ paths:
           description: Not a member of the requested shop
         "409":
           description: Cloud revision or access changed
-        "503":
-          $ref: "#/components/responses/WriteMaintenance"
   /shop/upgrade-request:
     post:
       operationId: requestSellerFullAccess
@@ -133,8 +108,6 @@ paths:
           description: No assigned shop
         "409":
           description: Access changed
-        "503":
-          $ref: "#/components/responses/WriteMaintenance"
   /shop/sellers:
     get:
       operationId: listCompanySellerAccess
@@ -186,8 +159,6 @@ paths:
           description: Verified company administrator email required
         "404":
           description: Shop not found
-        "503":
-          $ref: "#/components/responses/WriteMaintenance"
   /healthz:
     get:
       operationId: healthCheck
@@ -227,7 +198,7 @@ paths:
         "429":
           description: Shared AI scan budget exhausted
         "503":
-          description: AI scanning/budget storage unavailable, or recovery maintenance (code BUYME_MAINTENANCE with Retry-After 60). No reservation or provider call is made during maintenance.
+          description: AI scanning or budget storage unavailable
         "502":
           description: Document reading service failed
   /catalog/scan-product:
@@ -254,52 +225,11 @@ paths:
         "429":
           description: Shared AI scan budget exhausted
         "503":
-          description: AI scanning/budget storage unavailable, or recovery maintenance (code BUYME_MAINTENANCE with Retry-After 60). No reservation or provider call is made during maintenance.
+          description: AI scanning or budget storage unavailable
         "502":
           description: Photo reading service failed
 components:
-  responses:
-    WriteMaintenance:
-      description: Database recovery freeze. Keep device copies and retry; no write is acknowledged. Also applies to GET shop when provisioning a new shop or membership is required.
-      headers:
-        Retry-After:
-          description: Retry interval in seconds, not estimated downtime
-          schema:
-            type: integer
-            enum: [60]
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/RecoveryRetryMessage"
   schemas:
-    RecoveryRetryMessage:
-      type: object
-      required: [code, error, retryAfterSeconds]
-      properties:
-        code:
-          type: string
-          enum: [BUYME_MAINTENANCE]
-        error:
-          type: string
-        retryAfterSeconds:
-          type: integer
-          enum: [60]
-    DatabaseFreezeStatus:
-      type: object
-      required: [instanceId, maintenance, databaseReadOnly, verified]
-      properties:
-        instanceId:
-          type: string
-        maintenance:
-          type: boolean
-        databaseReadOnly:
-          type: [boolean, "null"]
-        verified:
-          type: boolean
-        retryAfterSeconds:
-          type: integer
-        error:
-          type: string
     SellerImageSyncInput:
       type: object
       required: [contentType, base64]
