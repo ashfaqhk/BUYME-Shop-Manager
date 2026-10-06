@@ -4,6 +4,7 @@ import type { Product, Variant } from './catalog-data';
 import type { ImportBillLine } from './list-import-types';
 import ListImportDialog from './ListImportDialog';
 import { initialQuantity, quantityStep, roundMoney, roundQuantity, validQuantity as isValidQuantity } from './quantity-units';
+import { quickAddQuantity } from './counter-policy';
 
 export type CalculatorBillLine = {
   lineId: string;
@@ -109,7 +110,7 @@ export default function BillingCalculator({
   }
 
   function canQuickAdd(product: Product) {
-    return quickAdd && product.variants.length === 1 && quantityStep(product.variants[0].unit) === 1;
+    return quickAddQuantity(product, quickAdd) !== null;
   }
 
   function beginLongPress(event: React.PointerEvent<HTMLButtonElement>, product: Product) {
@@ -129,7 +130,7 @@ export default function BillingCalculator({
   function selectFromGrid(product: Product, button: HTMLButtonElement) {
     if (ignoreClick.current === product.id) { ignoreClick.current = null; return; }
     if (canQuickAdd(product)) {
-      onAdd(product, product.variants[0], 1);
+      onAdd(product, product.variants[0], quickAddQuantity(product, quickAdd)!);
       return;
     }
     openProduct(product, button);
@@ -223,7 +224,7 @@ export default function BillingCalculator({
               <label className={`flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1.5 ${quickAdd ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}><input type="radio" name="tap-mode" checked={quickAdd} onChange={() => setQuickAddMode(true)} className="accent-primary" data-testid="radio-quick-add" /> Quick add</label>
               <label className={`flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1.5 ${!quickAdd ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}><input type="radio" name="tap-mode" checked={!quickAdd} onChange={() => setQuickAddMode(false)} className="accent-primary" data-testid="radio-choose-quantity" /> Enter quantity</label>
             </div>
-            <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{quickAdd ? 'Tap once for 1, twice for 2. Long-press to edit. Products with sizes or weight always open first.' : 'Tap a product to choose its size and quantity.'}</p>
+            <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{quickAdd ? 'Single-type products add immediately at their default quantity. Multiple types open a selection. Long-press to edit quantity.' : 'Tap a product to choose its size and quantity.'}</p>
           </fieldset>
           {search && !searchOpen && <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-primary/20 bg-card px-4 py-2.5 text-xs font-bold text-primary" data-testid="status-active-search"><span className="min-w-0 truncate">Results for “{search}”</span><button type="button" onClick={() => onSearch('')} aria-label="Clear product search" className="flex shrink-0 items-center gap-1" data-testid="button-clear-search"><X size={15} /> Clear</button></div>}
           {products.length ? (
