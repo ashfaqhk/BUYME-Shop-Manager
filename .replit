@@ -1,4 +1,4 @@
-modules = ["nodejs-24", "java-graalvm22.3"]
+modules = ["nodejs-24", "java-graalvm22.3", "postgresql-16"]
 
 [deployment]
 router = "application"
@@ -22,3 +22,8 @@ timeoutMs = 20000
 [nix]
 channel = "stable-25_05"
 packages = ["gradle"]
+
+[userenv]
+
+[userenv.shared]
+BUYME_COMPANY_ADMIN_EMAIL = "ashfaqhkamalapura@gmail.com"
