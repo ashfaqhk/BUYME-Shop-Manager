@@ -28,3 +28,17 @@ mtime_ms = 1791288006156
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:96387411-2e6a-4274-ab28-c881e129713f/42d91917-5b94-4622-ad65-c8bf26430a48/5954c1de-fd37-4356-8ec1-c3cebaa4284a"
 storage_version_token = "1791288036557809"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "pe_yikCYwICySj1Kd9loe"
+uri = "file://artifacts/buyme/downloads/BUYME-v1.2-debug.apk"
+type = "unspecified"
+title = "BUYME v1.2 — Updated Android APK"
+description = "Newly rebuilt Android APK, version 1.2 (version code 3). Signature verified and matches v1.1 for an in-place update. Opens the published BUYME web application."
+logical_id = "2a7c4bfc-9277-4add-aad9-046939033f6f"
+content_hash = "sha256:c574d761792cfc5158bbf7f59912a07f8a775dd9947eee93bdaa29072e2021cf"
+size = 1207463
+mtime_ms = 1791292071744
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:96387411-2e6a-4274-ab28-c881e129713f/2a7c4bfc-9277-4add-aad9-046939033f6f/9b82e160-40dd-4ec8-b96b-69865b7178e2"
+storage_version_token = "1791292122551680"
+content_type = "application/octet-stream"
