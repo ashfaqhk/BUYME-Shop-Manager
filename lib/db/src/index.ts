@@ -5,13 +5,13 @@ import * as schema from "./schema";
 const { Pool } = pg;
 
 const databaseUrl =
-  process.env.NODE_ENV === "production" || process.env.NODE_ENV === "test"
+  process.env.NODE_ENV === "test"
     ? process.env.DATABASE_URL
-    : process.env.SUPABASE_DATABASE_URL ?? process.env.DATABASE_URL;
+    : process.env.SUPABASE_DATABASE_URL;
 
 if (!databaseUrl) {
   throw new Error(
-    "A database connection must be configured for this environment.",
+    "Configure SUPABASE_DATABASE_URL for the app, or DATABASE_URL for tests.",
   );
 }
 

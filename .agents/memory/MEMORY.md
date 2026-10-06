@@ -6,4 +6,4 @@
 - [Android builds on Replit](android-build-environment.md) — The default Nix Android SDK includes unnecessary emulators; use a minimal composed SDK when building APKs here.
 - [AI scan spending protection](ai-scan-spending-protection.md) — Keep billable scan attempts under a shared persistent budget until owner identity can be established.
 - [Basic and Full versions](app-versions.md) — Basic is a simplified interface over the same shop data; switching versions must not discard products or bills.
-- [Supabase environment split](supabase-environment-split.md) — Development uses Supabase; production stays on Replit until its source data can be migrated.
+- [Shared Supabase database](supabase-environment-split.md) — Development and production share Supabase; Replit source databases are retained for recovery.
