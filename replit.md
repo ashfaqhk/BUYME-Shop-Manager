@@ -8,10 +8,11 @@ BUYME is a local-first shop counter workspace for fast billing, inventory tracki
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
+- `pnpm --filter @workspace/db run push` — push DB schema changes to shared Supabase; review before running.
 - Required app env: `SUPABASE_DATABASE_URL` — shared Supabase PostgreSQL connection.
 - `DATABASE_URL` is retained for tests/recovery; it is not the app's runtime fallback.
 - Database recovery: follow `docs/database-recovery.md` before reverting database routing. Reconcile and verify all new data first; never restore the retained pre-cutover source over newer shop changes.
+- Post-merge setup installs frozen dependencies and refreshes TypeScript declarations only. It must not automatically push schemas because development and production share Supabase.
 
 ## Stack
 
