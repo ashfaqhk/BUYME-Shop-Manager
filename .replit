@@ -27,3 +27,6 @@ packages = ["gradle"]
 
 [userenv.shared]
 BUYME_COMPANY_ADMIN_EMAIL = "ashfaqhkamalapura@gmail.com"
+
+[objectStorage]
+defaultBucketID = "replit-objstore-38e45e2b-d260-4561-8a85-69db10ce8067"
