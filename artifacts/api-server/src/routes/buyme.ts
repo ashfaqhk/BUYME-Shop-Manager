@@ -3,7 +3,7 @@ import { clerkClient, getAuth } from "@clerk/express";
 import { and, eq, sql } from "drizzle-orm";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { db, buymeImagesTable, buymeMembershipsTable, buymeShopsTable } from "@workspace/db";
+import { db, buymeImagesTable, buymeMembershipsTable, buymeShopsTable, assertWritesAllowed, maintenanceMode } from "@workspace/db";
 import { ObjectNotFoundError, ObjectStorageService } from "../lib/objectStorage";
 
 const router: IRouter = Router();
@@ -41,6 +41,9 @@ async function ensureShop(current: NonNullable<Awaited<ReturnType<typeof session
   if (invitedShopId) {
     const [shop] = await db.select().from(buymeShopsTable).where(eq(buymeShopsTable.id, invitedShopId)).limit(1);
     if (shop) {
+      const existing = await membership(current.userId, shop.id);
+      if (existing) return existing;
+      assertWritesAllowed();
       await db.insert(buymeMembershipsTable).values({
         id: randomUUID(), shopId: shop.id, userId: current.userId, email: current.email, role: "staff",
       }).onConflictDoNothing();
@@ -49,6 +52,7 @@ async function ensureShop(current: NonNullable<Awaited<ReturnType<typeof session
   }
   const existing = await membership(current.userId);
   if (existing) return existing;
+  assertWritesAllowed();
   const id = randomUUID();
   const [shop] = await db.insert(buymeShopsTable).values({
     id, name: "My shop", ownerUserId: current.userId, settings: defaultSettings,
@@ -262,7 +266,10 @@ router.get("/shop/images/:id", async (req, res): Promise<void> => {
     const response = await storage.downloadObject(file);
     if (!response.ok) { res.status(response.status).end(); return; }
     const bytes = Buffer.from(await response.arrayBuffer());
-    await db.update(buymeImagesTable).set({ imageBase64: bytes.toString("base64") }).where(eq(buymeImagesTable.id, image.id));
+    // Image reads stay available, but must not backfill the database in recovery.
+    if (!maintenanceMode) {
+      await db.update(buymeImagesTable).set({ imageBase64: bytes.toString("base64") }).where(eq(buymeImagesTable.id, image.id));
+    }
     res.setHeader("Content-Type", image.contentType);
     res.setHeader("Cache-Control", "private, no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");

@@ -23,6 +23,7 @@ import type {
   BillListDocument,
   BillListItems,
   CompanyAccessPatchInput,
+  DatabaseFreezeStatus,
   HealthStatus,
   ListCompanySellerAccess200,
   ProductPhotoDocument,
@@ -31,7 +32,8 @@ import type {
   SellerImageSyncResult,
   SellerShopDocument,
   SellerShopSaveInput,
-  ShopAccessDocument
+  ShopAccessDocument,
+  WriteMaintenanceResponse
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -60,6 +62,84 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getGetMaintenanceStatusUrl = () => {
+
+
+
+
+  return `/api/maintenance`
+}
+
+/**
+ * Public no-store diagnostics, not a toggle. Verifies a real connection's read-only setting. Operators must inventory and drain every instance before relying on the freeze.
+ * @summary Read this API instance's database recovery freeze status
+ */
+export const getMaintenanceStatus = async ( options?: Parameters<typeof customFetch>[1]): Promise<DatabaseFreezeStatus> => {
+
+  return customFetch<DatabaseFreezeStatus>(getGetMaintenanceStatusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMaintenanceStatusQueryKey = () => {
+    return [
+    `/api/maintenance`
+    ] as const;
+    }
+
+
+export const getGetMaintenanceStatusQueryOptions = <TData = Awaited<ReturnType<typeof getMaintenanceStatus>>, TError = ErrorType<DatabaseFreezeStatus>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMaintenanceStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMaintenanceStatusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMaintenanceStatus>>> = ({ signal }) => getMaintenanceStatus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMaintenanceStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMaintenanceStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getMaintenanceStatus>>>
+export type GetMaintenanceStatusQueryError = ErrorType<DatabaseFreezeStatus>
+
+
+/**
+ * @summary Read this API instance's database recovery freeze status
+ */
+
+export function useGetMaintenanceStatus<TData = Awaited<ReturnType<typeof getMaintenanceStatus>>, TError = ErrorType<DatabaseFreezeStatus>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMaintenanceStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMaintenanceStatusQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getSyncSellerImageUrl = () => {
 
@@ -104,7 +184,7 @@ return customFetch<SellerImageSyncResult>(getSyncSellerImageUrl(),
 
 export const getSyncSellerImageMutationKey = () => ['syncSellerImage'] as const;
 
-export const getSyncSellerImageMutationOptions = <TError = ErrorType<void>,
+export const getSyncSellerImageMutationOptions = <TError = ErrorType<void | WriteMaintenanceResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof syncSellerImage>>, TError,SyncSellerImageMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof syncSellerImage>>, TError,SyncSellerImageMutationVariables, TContext> => {
 
@@ -133,13 +213,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SyncSellerImageMutationResult = NonNullable<Awaited<ReturnType<typeof syncSellerImage>>>
     export type SyncSellerImageMutationBody = BodyType<SellerImageSyncInput>
-    export type SyncSellerImageMutationError = ErrorType<void>
+    export type SyncSellerImageMutationError = ErrorType<void | WriteMaintenanceResponse>
     export type SyncSellerImageMutationVariables = {data: BodyType<SellerImageSyncInput>}
 
     /**
  * @summary Store an uploaded image in the assigned shop's Supabase database
  */
-export const useSyncSellerImage = <TError = ErrorType<void>,
+export const useSyncSellerImage = <TError = ErrorType<void | WriteMaintenanceResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof syncSellerImage>>, TError,SyncSellerImageMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof syncSellerImage>>,
@@ -184,7 +264,7 @@ export const getGetSellerShopQueryKey = () => {
     }
 
 
-export const getGetSellerShopQueryOptions = <TData = Awaited<ReturnType<typeof getSellerShop>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSellerShop>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetSellerShopQueryOptions = <TData = Awaited<ReturnType<typeof getSellerShop>>, TError = ErrorType<void | WriteMaintenanceResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSellerShop>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -203,14 +283,14 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetSellerShopQueryResult = NonNullable<Awaited<ReturnType<typeof getSellerShop>>>
-export type GetSellerShopQueryError = ErrorType<void>
+export type GetSellerShopQueryError = ErrorType<void | WriteMaintenanceResponse>
 
 
 /**
  * @summary Load the verified account's assigned shop and current access
  */
 
-export function useGetSellerShop<TData = Awaited<ReturnType<typeof getSellerShop>>, TError = ErrorType<void>>(
+export function useGetSellerShop<TData = Awaited<ReturnType<typeof getSellerShop>>, TError = ErrorType<void | WriteMaintenanceResponse>>(
   options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSellerShop>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
@@ -271,7 +351,7 @@ return customFetch<SellerShopDocument>(getSaveSellerShopUrl(),
 
 export const getSaveSellerShopMutationKey = () => ['saveSellerShop'] as const;
 
-export const getSaveSellerShopMutationOptions = <TError = ErrorType<void>,
+export const getSaveSellerShopMutationOptions = <TError = ErrorType<void | WriteMaintenanceResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveSellerShop>>, TError,SaveSellerShopMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof saveSellerShop>>, TError,SaveSellerShopMutationVariables, TContext> => {
 
@@ -300,13 +380,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SaveSellerShopMutationResult = NonNullable<Awaited<ReturnType<typeof saveSellerShop>>>
     export type SaveSellerShopMutationBody = BodyType<SellerShopSaveInput>
-    export type SaveSellerShopMutationError = ErrorType<void>
+    export type SaveSellerShopMutationError = ErrorType<void | WriteMaintenanceResponse>
     export type SaveSellerShopMutationVariables = {data: BodyType<SellerShopSaveInput>}
 
     /**
  * @summary Save the device snapshot using optimistic concurrency
  */
-export const useSaveSellerShop = <TError = ErrorType<void>,
+export const useSaveSellerShop = <TError = ErrorType<void | WriteMaintenanceResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveSellerShop>>, TError,SaveSellerShopMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof saveSellerShop>>,
@@ -346,7 +426,7 @@ export const requestSellerFullAccess = async ( options?: Parameters<typeof custo
 
 export const getRequestSellerFullAccessMutationKey = () => ['requestSellerFullAccess'] as const;
 
-export const getRequestSellerFullAccessMutationOptions = <TError = ErrorType<void>,
+export const getRequestSellerFullAccessMutationOptions = <TError = ErrorType<void | WriteMaintenanceResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestSellerFullAccess>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof requestSellerFullAccess>>, TError,void, TContext> => {
 
@@ -375,13 +455,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RequestSellerFullAccessMutationResult = NonNullable<Awaited<ReturnType<typeof requestSellerFullAccess>>>
 
-    export type RequestSellerFullAccessMutationError = ErrorType<void>
+    export type RequestSellerFullAccessMutationError = ErrorType<void | WriteMaintenanceResponse>
 
 
     /**
  * @summary Request company approval for Full access
  */
-export const useRequestSellerFullAccess = <TError = ErrorType<void>,
+export const useRequestSellerFullAccess = <TError = ErrorType<void | WriteMaintenanceResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestSellerFullAccess>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof requestSellerFullAccess>>,
@@ -513,7 +593,7 @@ return customFetch<ShopAccessDocument>(getUpdateCompanySellerAccessUrl(id),
 
 export const getUpdateCompanySellerAccessMutationKey = () => ['updateCompanySellerAccess'] as const;
 
-export const getUpdateCompanySellerAccessMutationOptions = <TError = ErrorType<void>,
+export const getUpdateCompanySellerAccessMutationOptions = <TError = ErrorType<void | WriteMaintenanceResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCompanySellerAccess>>, TError,UpdateCompanySellerAccessMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateCompanySellerAccess>>, TError,UpdateCompanySellerAccessMutationVariables, TContext> => {
 
@@ -542,13 +622,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateCompanySellerAccessMutationResult = NonNullable<Awaited<ReturnType<typeof updateCompanySellerAccess>>>
     export type UpdateCompanySellerAccessMutationBody = BodyType<CompanyAccessPatchInput>
-    export type UpdateCompanySellerAccessMutationError = ErrorType<void>
+    export type UpdateCompanySellerAccessMutationError = ErrorType<void | WriteMaintenanceResponse>
     export type UpdateCompanySellerAccessMutationVariables = {id: string;data: BodyType<CompanyAccessPatchInput>}
 
     /**
  * @summary Approve or downgrade a shop plan, or pause or restore its access
  */
-export const useUpdateCompanySellerAccess = <TError = ErrorType<void>,
+export const useUpdateCompanySellerAccess = <TError = ErrorType<void | WriteMaintenanceResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCompanySellerAccess>>, TError,UpdateCompanySellerAccessMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof updateCompanySellerAccess>>,

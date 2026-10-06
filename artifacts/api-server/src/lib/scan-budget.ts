@@ -1,4 +1,4 @@
-import { pool } from "@workspace/db";
+import { pool, assertWritesAllowed } from "@workspace/db";
 
 // Global caps, not keyed by IP: changing networks or restarting the server
 // cannot create a fresh allowance. Every attempted provider call consumes one.
@@ -6,6 +6,7 @@ export const DAILY_SCAN_LIMIT = 8;
 export const MONTHLY_SCAN_LIMIT = 40;
 
 export async function reserveScan(): Promise<boolean> {
+  assertWritesAllowed();
   const today = new Date().toISOString().slice(0, 10);
   const month = today.slice(0, 7);
   // A single upsert makes reservation atomic across simultaneous requests and

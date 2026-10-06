@@ -6,6 +6,7 @@ import { logger } from "./lib/logger";
 import { clerkMiddleware } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import { CLERK_PROXY_PATH, clerkProxyMiddleware, getClerkProxyHost } from "./middlewares/clerkProxyMiddleware";
+import { maintenanceGate, maintenanceStatus, maintenanceErrors } from "./middlewares/maintenance";
 
 const app: Express = express();
 
@@ -30,6 +31,8 @@ app.use(
 );
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 app.use(cors({ credentials: true, origin: true }));
+app.get("/api/maintenance", maintenanceStatus);
+app.use("/api", maintenanceGate);
 // This one route accepts a single, short-lived document encoded as a data URL.
 app.use("/api/billing/extract-list", express.json({ limit: "9mb" }));
 app.use("/api/catalog/scan-product", express.json({ limit: "9mb" }));
@@ -42,5 +45,6 @@ app.use(clerkMiddleware((req) => ({
 })));
 
 app.use("/api", router);
+app.use(maintenanceErrors);
 
 export default app;
