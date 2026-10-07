@@ -5,10 +5,13 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SellerShopDocumentHistoryMonths } from './sellerShopDocumentHistoryMonths';
 import type { SellerShopDocumentMode } from './sellerShopDocumentMode';
 import type { SellerShopDocumentSettings } from './sellerShopDocumentSettings';
 
 export interface SellerShopDocument {
+  historyStart?: Date;
+  historyMonths?: SellerShopDocumentHistoryMonths;
   /** @nullable */
   shopId: string | null;
   shopName: string;

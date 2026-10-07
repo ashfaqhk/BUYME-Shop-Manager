@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { activeOfflineUser, backupDeviceShop, clearOfflineUser, loadDeviceShop, persistDeviceShop, rememberOfflineUser } from "./offline-store";
 import { cacheCloudPhotos, canonicalPhotos, displayPhotos, externalizePhotos } from "./shop-photos";
 import { mergeSnapshots, sameData, type ConflictChoice } from "./shop-merge";
+import { canonicalHistory, historyVisible, hydrateHistory, mergeHistory } from "@workspace/api-zod";
 import { snapshotOf, type LocalShop, type ShopState, type Snapshot } from "./shop-types";
 
 const api = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/api/shop`;
@@ -67,7 +68,7 @@ export function useShopSync(userId: string, authenticated: boolean) {
     let photoWarning = false;
     try {
       try { await storage.current; } catch { await persist(); }
-      const cloud = await readResponse(await fetch(api, { credentials: "include", cache: "no-store" }));
+      let cloud = await readResponse(await fetch(api, { credentials: "include", cache: "no-store" }));
       if (!alive.current) return null;
       if (cloud.isCompanyAdmin) { clearOfflineUser(); setShop(cloud); return cloud; }
       if (record.current && record.current.server.shopId !== cloud.shopId) throw new Error("Your assigned shop changed. The old device data is preserved. Sign out and contact the company administrator.");
@@ -77,6 +78,29 @@ export function useShopSync(userId: string, authenticated: boolean) {
       if (!cloud.accessEnabled) {
         record.current.server = { ...record.current.server, accessEnabled: false, premiumApproved: cloud.premiumApproved };
         publish(); await persist(); setSaveStatus("Access paused · device changes kept"); return cloud;
+      }
+      if (record.current && cloud.historyStart) {
+        const archived = record.current.server.sales.filter((row) => !historyVisible(row, cloud.historyStart!));
+        const fingerprints = await Promise.all(archived.flatMap((row) => {
+          if (!row || typeof row !== "object" || !("id" in row) || typeof row.id !== "string") return [];
+          const id = row.id;
+          return [crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalHistory(row))).then((hash) => ({
+            id, fingerprint: [...new Uint8Array(hash)].map((n) => n.toString(16).padStart(2, "0")).join(""),
+          }))];
+        }));
+        let changed: unknown[] = [];
+        if (fingerprints.length) {
+          const response = await fetch(`${api}/history-refresh`, {
+            method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ records: fingerprints, revision: cloud.revision }),
+          });
+          if (response.status === 409) { schedule(800); return record.current.server; }
+          if (!response.ok) throw new Error("Could not reconcile older saved bills. Your device copy is kept.");
+          const body = await response.json() as { sales: unknown[] };
+          if (!Array.isArray(body.sales)) throw new Error("Invalid saved-history response.");
+          changed = body.sales;
+        }
+        cloud = hydrateHistory({ ...cloud, sales: mergeHistory(cloud.sales, changed) }, record.current.server);
       }
       const current = record.current;
       const result = current.pending ? mergeSnapshots(snapshotOf(current.server), current.local, snapshotOf(cloud), conflictChoice.current) :
@@ -102,7 +126,8 @@ export function useShopSync(userId: string, authenticated: boolean) {
           body: JSON.stringify({ ...safe.snapshot, shopId: cloud.shopId, revision: cloud.revision }),
         });
         if (response.status === 409) { setSaveStatus("Saved on device · checking cloud changes"); schedule(800); return cloud; }
-        const saved = await readResponse(response);
+        const downloaded = await readResponse(response);
+        const saved = hydrateHistory(downloaded, safe.snapshot);
         if (!alive.current) return null;
         if (saved.shopId !== record.current!.server.shopId) throw new Error("The server returned another shop. Your device copy has not been replaced.");
         const latest = record.current!;

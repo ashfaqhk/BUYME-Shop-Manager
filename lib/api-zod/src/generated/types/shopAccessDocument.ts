@@ -6,6 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
+/**
+ * Uploads retain all history. New downloads include the last 2 calendar months for Basic or 24 months for Premium, plus unpaid bills and recent collections.
+ */
 export interface ShopAccessDocument {
   id: string;
   premiumApproved: boolean;

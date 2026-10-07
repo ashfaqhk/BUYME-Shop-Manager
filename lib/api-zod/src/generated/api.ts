@@ -9,6 +9,33 @@ import * as zod from 'zod';
 
 
 /**
+ * Does not download new out-of-window history. Authenticated assigned-shop membership and enabled access required.
+ * @summary Reconcile changed historical bills already saved on this device
+ */
+
+export const refreshSavedHistoryBodyRecordsItemIdMax = 200;
+
+export const refreshSavedHistoryBodyRecordsItemFingerprintMin = 64;
+export const refreshSavedHistoryBodyRecordsItemFingerprintMax = 64;
+
+export const refreshSavedHistoryBodyRecordsMax = 100000;
+
+
+
+export const RefreshSavedHistoryBody = zod.object({
+  "revision": zod.number().int().min(1),
+  "records": zod.array(zod.object({
+  "id": zod.string().max(refreshSavedHistoryBodyRecordsItemIdMax),
+  "fingerprint": zod.string().min(refreshSavedHistoryBodyRecordsItemFingerprintMin).max(refreshSavedHistoryBodyRecordsItemFingerprintMax)
+})).max(refreshSavedHistoryBodyRecordsMax)
+})
+
+export const RefreshSavedHistoryResponse = zod.object({
+  "sales": zod.array(zod.unknown())
+})
+
+
+/**
  * Verified member with enabled access required. Validated JPEG, PNG or WebP bytes, at most 6 MB. Content addressing makes identical-image retries idempotent within a shop.
  * @summary Store an uploaded image in the assigned shop's Supabase database
  */
@@ -34,6 +61,8 @@ export const SyncSellerImageResponse = zod.object({
  * @summary Load the verified account's assigned shop and current access
  */
 export const GetSellerShopResponse = zod.object({
+  "historyStart": zod.coerce.date().optional(),
+  "historyMonths": zod.union([zod.literal(2),zod.literal(24)]).optional(),
   "shopId": zod.string().nullable(),
   "shopName": zod.string(),
   "email": zod.string(),
@@ -71,6 +100,8 @@ export const SaveSellerShopBody = zod.object({
 })
 
 export const SaveSellerShopResponse = zod.object({
+  "historyStart": zod.coerce.date().optional(),
+  "historyMonths": zod.union([zod.literal(2),zod.literal(24)]).optional(),
   "shopId": zod.string().nullable(),
   "shopName": zod.string(),
   "email": zod.string(),
@@ -93,6 +124,8 @@ export const SaveSellerShopResponse = zod.object({
  * @summary Request company approval for Full access
  */
 export const RequestSellerFullAccessResponse = zod.object({
+  "historyStart": zod.coerce.date().optional(),
+  "historyMonths": zod.union([zod.literal(2),zod.literal(24)]).optional(),
   "shopId": zod.string().nullable(),
   "shopName": zod.string(),
   "email": zod.string(),
@@ -119,7 +152,7 @@ export const ListCompanySellerAccessResponse = zod.object({
   "premiumApproved": zod.boolean(),
   "accessEnabled": zod.boolean(),
   "upgradeRequestedAt": zod.coerce.date().nullable()
-}).and(zod.object({
+}).describe('Uploads retain all history. New downloads include the last 2 calendar months for Basic or 24 months for Premium, plus unpaid bills and recent collections.').and(zod.object({
   "name": zod.string(),
   "members": zod.array(zod.object({
   "email": zod.string(),
@@ -147,7 +180,7 @@ export const UpdateCompanySellerAccessResponse = zod.object({
   "premiumApproved": zod.boolean(),
   "accessEnabled": zod.boolean(),
   "upgradeRequestedAt": zod.coerce.date().nullable()
-})
+}).describe('Uploads retain all history. New downloads include the last 2 calendar months for Basic or 24 months for Premium, plus unpaid bills and recent collections.')
 
 
 /**

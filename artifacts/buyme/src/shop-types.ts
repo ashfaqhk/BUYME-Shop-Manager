@@ -15,6 +15,8 @@ export type ShopState = {
   settings: Record<string, unknown>;
   revision: number;
   isNew?: boolean;
+  historyStart?: string;
+  historyMonths?: 2 | 24;
 };
 
 export type Snapshot = Pick<ShopState, "catalog" | "sales" | "settings">;

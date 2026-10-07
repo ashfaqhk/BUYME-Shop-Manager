@@ -15,6 +15,25 @@ tags:
   - name: catalog
     description: Product photo recognition
 paths:
+  /shop/history-refresh:
+    post:
+      operationId: refreshSavedHistory
+      tags: [shop]
+      summary: Reconcile changed historical bills already saved on this device
+      description: Does not download new out-of-window history. Authenticated assigned-shop membership and enabled access required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SavedHistoryInput"
+      responses:
+        "200":
+          description: Changed saved records only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedHistoryDocument"
   /shop/images:
     post:
       operationId: syncSellerImage
@@ -281,6 +300,12 @@ components:
       type: object
       required: [shopId, shopName, email, role, isCompanyAdmin, premiumApproved, accessEnabled, upgradeRequestedAt, mode, catalog, sales, settings, revision]
       properties:
+        historyStart:
+          type: string
+          format: date-time
+        historyMonths:
+          type: integer
+          enum: [2, 24]
         shopId:
           type: [string, "null"]
         shopName:
@@ -315,6 +340,7 @@ components:
         isNew:
           type: boolean
     ShopAccessDocument:
+      description: Uploads retain all history. New downloads include the last 2 calendar months for Basic or 24 months for Premium, plus unpaid bills and recent collections.
       type: object
       required: [id, premiumApproved, accessEnabled, upgradeRequestedAt]
       properties:
@@ -327,6 +353,36 @@ components:
         upgradeRequestedAt:
           type: [string, "null"]
           format: date-time
+    SavedHistoryInput:
+      type: object
+      required: [records, revision]
+      properties:
+        revision:
+          type: integer
+          minimum: 1
+        records:
+          type: array
+          maxItems: 100000
+          items:
+            $ref: "#/components/schemas/SavedHistoryFingerprint"
+    SavedHistoryFingerprint:
+      type: object
+      required: [id, fingerprint]
+      properties:
+        id:
+          type: string
+          maxLength: 200
+        fingerprint:
+          type: string
+          minLength: 64
+          maxLength: 64
+    SavedHistoryDocument:
+      type: object
+      required: [sales]
+      properties:
+        sales:
+          type: array
+          items: {}
     CompanySellerDocument:
       allOf:
         - $ref: "#/components/schemas/ShopAccessDocument"

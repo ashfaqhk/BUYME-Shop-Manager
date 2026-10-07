@@ -4,11 +4,15 @@
 
 Click **Basic plan**, then **Request Full access**. This records a request; it does not grant access automatically. The company administrator signs in using the configured, verified company email, opens **Seller access**, searches for the seller's email, and selects **Approve Full**. The seller can use **Check status** or **Sync now**; periodic refresh also updates access without reloading the workspace.
 
-Approved sellers can choose Basic or Full from the same plan control. This changes the interface preference, not approval, and preserves the same catalog, sales, stock and payment profiles. Basic checkout does not create individual invoice/receipt PDFs or payment QRs. Both versions provide Settings and Insights data reports.
+Approved sellers can choose Basic or Full from the same plan control. This changes the interface preference, not approval, and preserves the same catalog, sales, stock and payment profiles. Basic shows only Billing and Catalog, with no Insights or Settings. Basic checkout does not create individual invoice/receipt PDFs or payment QRs. Full provides Settings and Insights data reports.
 
 The administrator can downgrade a shop to Basic or pause/restore its access. Changes apply to every member of that shop. Pausing does not delete data. Paused accounts cannot save, upload images, invite members or retrieve cloud shop contents; the account page returns only access metadata.
 
 ## Device and Supabase copies
+
+All history is uploaded. Newly downloaded history covers two calendar months for Basic accounts and two years for Premium-approved accounts. Switching an approved Premium account to the Basic interface does not downgrade its allowance. The current catalog, outstanding credit and recent repayments stay available even if an invoice is older than the window. Already-saved device history and older Supabase records are retained. Previously saved historical bills can be reconciled without downloading an entire archive to a fresh device.
+
+Both billing views show today's billed total (including credit), cash received, UPI received and total actually received. Collections on older invoices count as receipts on their payment date, not as new billed revenue. Full Insights also includes searchable and sortable type-level inventory, distinct low/out-of-stock filters, red warnings and estimates based on recent selling. Recent stock arrivals show recorded initial stock and positive manual/scan additions; unknown historical creation dates are not invented.
 
 Open and sign in online once on each device. Saved catalog, sales and settings are kept in account-scoped IndexedDB before a cloud sync is attempted. Offline edits remain pending across reopening the app. A recorded payment and its stock adjustment are one device-storage transaction.
 

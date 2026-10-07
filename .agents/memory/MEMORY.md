@@ -8,3 +8,5 @@
 - [Basic and Full versions](app-versions.md) — Basic is a simplified interface over the same shop data; switching versions must not discard products or bills.
 - [Shared Supabase database](supabase-environment-split.md) — Development and production share Supabase; Replit source databases are retained for recovery.
 - [Device data and online access](offline-and-access-policy.md) — Device-first saves, Supabase copies, recent PDF reports and email-based company-admin approval must work together.
+- [History download policy](history-download-policy.md) — Upload all history; limit new downloads to Basic's 2 months or Premium's 2 years without erasing older records.
+- [Dependency security backports](dependency-backports.md) — Preserve validated depth guards until upstream fixes braces; report the version-based audit warning honestly.

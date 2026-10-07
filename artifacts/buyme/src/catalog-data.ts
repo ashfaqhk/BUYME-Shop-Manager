@@ -9,6 +9,8 @@ export type Variant = {
 };
 
 export type Product = {
+  createdAt?: string;
+  stockEvents?: { id: string; variantId: string; qty: number; createdAt: string; source: "initial" | "manual" | "scan"; unit?: string; variantName?: string }[];
   id: string;
   name: string;
   category: string;

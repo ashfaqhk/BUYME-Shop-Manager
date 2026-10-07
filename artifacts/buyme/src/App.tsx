@@ -9,6 +9,9 @@ import { accountUpiUri, prepareQrImage, validatePaymentQR, type PaymentQR } from
 import { roundMoney, roundQuantity, validQuantity } from './quantity-units';
 import { AccountBar, BuymeAccess, uploadSellerPhoto, useSellerShop } from './SellerAccess';
 import PlanAccess from './PlanAccess';
+import TodaySummary, { MoneyOverview } from './TodaySummary';
+import InventoryInsights from './InventoryInsights';
+import { recordStockAdditions } from './shop-analytics';
 import ReportExport, { ReportDownload } from './ReportExport';
 import { sameData } from './shop-merge';
 import {
@@ -173,7 +176,7 @@ function ShopWorkspace() {
     document.documentElement.classList.toggle('dark', settings.darkMode);
   }, [settings.darkMode]);
   useEffect(() => {
-    if (appVersion === 'basic' && (activeSection === 'Notifications' || activeSection === 'Broadcast')) setActiveSection('Billing');
+    if (appVersion === 'basic' && activeSection !== 'Billing' && activeSection !== 'Catalog') setActiveSection('Billing');
   }, [appVersion, activeSection]);
   useEffect(() => {
     if (!toast) return;
@@ -268,8 +271,8 @@ function ShopWorkspace() {
 
   const saveProduct = (product: Product) => {
     setCatalog((current) => current.some((item) => item.id === product.id)
-      ? current.map((item) => item.id === product.id ? product : item)
-      : [...current, product]);
+      ? current.map((item) => item.id === product.id ? recordStockAdditions(item, product, "manual") : item)
+      : [...current, recordStockAdditions(undefined, product, "manual")]);
     setProductModal({ open: false });
     flash(productModal.product ? 'Product details updated' : 'Product added to catalog');
   };
@@ -287,11 +290,11 @@ function ShopWorkspace() {
     if (!product || !variant) return 'Choose a product and size from your catalog.';
     if (typeof variant.stock === 'number' && (!Number.isSafeInteger(variant.stock) || variant.stock < 0)) return 'Current stock is invalid. Correct it in the product editor first.';
     if ((variant.stock ?? 0) + quantity > Number.MAX_SAFE_INTEGER) return 'That stock quantity is too large.';
-    setCatalog((current) => current.map((item) => item.id !== productId ? item : {
+    setCatalog((current) => current.map((item) => item.id !== productId ? item : recordStockAdditions(item, {
       ...item,
       updatedAt: 'Just now',
       variants: item.variants.map((option) => option.id === variantId ? { ...option, stock: (option.stock ?? 0) + quantity } : option),
-    }));
+    }, "scan")));
     flash(`${quantity} ${variant.unit} added to ${product.name} stock`);
     return null;
   };
@@ -401,12 +404,12 @@ function ShopWorkspace() {
            <div className="mb-4 flex flex-wrap items-center justify-end gap-3">{appVersion === 'full' && <ShopPlanAccess mode={appVersion} />}<AccountBar email={shop.email} role={shop.role} mode={appVersion} saveStatus={saveStatus} onRetry={retrySave} /></div>
    {appVersion === 'basic' && <div className="mb-5 flex flex-wrap items-center justify-between gap-3" data-testid="basic-navigation">
              <nav className="flex rounded-xl border border-border bg-card p-1" aria-label="Basic pages">
-               {(['Billing', 'Catalog', 'Insights', 'Settings'] as const).map((section) => <button key={section} type="button" onClick={() => changeSection(section)} aria-current={activeSection === section ? 'page' : undefined} className={`rounded-lg px-3 py-2 text-xs font-extrabold ${activeSection === section ? 'bg-primary text-primary-foreground' : 'text-primary'}`} data-testid={`basic-nav-${section.toLowerCase()}`}>{section}</button>)}
+               {(['Billing', 'Catalog'] as const).map((section) => <button key={section} type="button" onClick={() => changeSection(section)} aria-current={activeSection === section ? 'page' : undefined} className={`rounded-lg px-3 py-2 text-xs font-extrabold ${activeSection === section ? 'bg-primary text-primary-foreground' : 'text-primary'}`} data-testid={`basic-nav-${section.toLowerCase()}`}>{section}</button>)}
              </nav>
               <ShopPlanAccess mode={appVersion} />
            </div>}
            {activeSection === 'Billing' && <BillingCalculator key={sales.length} basic={appVersion === 'basic'} products={filteredProducts} search={search} onSearch={setSearch} bill={bill} subtotal={billSubtotal} gst={billGst} total={billTotal} onAdd={addToBill} onImport={importToBill} onAdjust={adjustBill} onClear={() => { setBill([]); flash('Current bill cleared'); }} onPay={() => setPaymentOpen(true)} />}
-           {appVersion === 'basic' && activeSection === 'Billing' && <BasicPaymentTotals sales={sales} />}
+           {activeSection === 'Billing' && <TodaySummary sales={sales} />}
            {appVersion === 'full' && activeSection === 'Billing' && <nav className="mt-20 border-t border-border pt-8" aria-label="More shop sections" data-testid="nav-billing-footer">
             <p className="mb-4 text-xs font-bold uppercase tracking-widest text-muted-foreground">More from your shop</p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -418,10 +421,10 @@ function ShopWorkspace() {
             </div>
           </nav>}
            {activeSection === 'Catalog' && <CatalogView catalog={catalog} basic={appVersion === 'basic'} onAdd={() => setProductModal({ open: true })} onScan={() => setScanOpen(true)} onEdit={(product) => setProductModal({ open: true, product })} />}
-             {activeSection === 'Insights' && <InsightsView sales={sales} catalog={catalog} settings={settings} onOpenBill={(sale) => appVersion === 'full' ? setReceiptSale(sale) : flash('Individual bill receipts are available in Full. You can download a data report in Basic.')} onCollectCredit={collectCredit} />}
+             {appVersion === 'full' && activeSection === 'Insights' && <InsightsView sales={sales} catalog={catalog} settings={settings} onOpenBill={setReceiptSale} onCollectCredit={collectCredit} />}
            {appVersion === 'full' && activeSection === 'Notifications' && <NotificationsView lowStock={lowStock} sales={sales} onGoCatalog={() => changeSection('Catalog')} />}
            {appVersion === 'full' && activeSection === 'Broadcast' && <BroadcastView settings={settings} onOpen={() => setBroadcastOpen(true)} />}
-             {activeSection === 'Settings' && <SettingsView settings={settings} sales={sales} catalog={catalog} appVersion={appVersion} onSave={(next) => {
+             {appVersion === 'full' && activeSection === 'Settings' && <SettingsView settings={settings} sales={sales} catalog={catalog} appVersion={appVersion} onSave={(next) => {
                void updateSnapshot((previous) => ({ ...previous, settings: { ...previous.settings, ...next, workspaceMode: previous.settings.workspaceMode } })).then(() => flash('Shop settings saved on this device')).catch((cause) => flash(cause instanceof Error ? cause.message : 'Could not save settings.'));
              }} />}
         </div>
@@ -704,8 +707,10 @@ function InsightsView({ sales, catalog, settings, onOpenBill, onCollectCredit }:
          {chartAvailable && validPeriod ? <div className="mt-8 flex h-28 items-end gap-2 sm:gap-4">{days.map((date, index) => <div key={date.toISOString()} className="flex flex-1 flex-col items-center gap-2" title={`${date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}: ${money(dailyRevenue[index])}`}><div className="flex h-24 w-full items-end"><div className={`w-full rounded-t-md ${dailyRevenue[index] === maxDailyRevenue && maxDailyRevenue > 0 ? 'bg-sidebar-primary' : 'bg-primary-foreground/20'}`} style={{ height: maxDailyRevenue > 0 ? `${dailyRevenue[index] / maxDailyRevenue * 100}%` : '0%' }} /></div><span className="text-[9px] font-mono-app text-primary-foreground/45">{date.toLocaleDateString('en-IN', { weekday: 'short' })}</span></div>)}</div> : <p className="mt-6 text-xs text-primary-foreground/70">Daily chart is available for valid ranges of up to 31 days.</p>}
       </section>
       <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6">
-         <p className="text-xs font-bold text-muted-foreground">Payment mix · {periodLabels[period].toLowerCase()}</p>
-        {collected > 0 ? <div className="mt-5 flex items-center gap-5"><div className="relative flex h-28 w-28 shrink-0 items-center justify-center rounded-full" style={{ background: `conic-gradient(hsl(var(--primary)) 0 ${upiPercent}%, hsl(var(--accent)) ${upiPercent}% 100%)` }}><div className="flex h-20 w-20 items-center justify-center rounded-full bg-card text-center"><span className="text-lg font-extrabold">₹</span></div></div><div className="space-y-4 text-xs"><div><div className="flex items-center gap-2 font-bold"><span className="h-2.5 w-2.5 rounded-full bg-primary" /> UPI <span className="ml-2 font-mono-app text-muted-foreground">{money(upi)}</span></div><p className="ml-4 mt-1 text-[10px] text-muted-foreground">{upiPercent.toFixed(1)}% of collected</p></div><div><div className="flex items-center gap-2 font-bold"><span className="h-2.5 w-2.5 rounded-full bg-accent" /> Cash <span className="ml-2 font-mono-app text-muted-foreground">{money(cash)}</span></div><p className="ml-4 mt-1 text-[10px] text-muted-foreground">{(100 - upiPercent).toFixed(1)}% of collected</p></div></div></div> : <p className="mt-5 text-xs text-muted-foreground">No collected payments in this period.</p>}
+         <p className="text-xs font-bold text-muted-foreground">Actual payments collected</p>
+         <p className="mt-4 text-3xl font-extrabold text-primary">{money(collected)}</p>
+         <dl className="mt-4 space-y-3 text-sm"><div className="flex justify-between"><dt>Cash received</dt><dd className="font-bold">{money(cash)}</dd></div><div className="flex justify-between"><dt>UPI received</dt><dd className="font-bold">{money(upi)}</dd></div></dl>
+         <p className="mt-3 text-xs text-muted-foreground">Unpaid credit is included in the total-billed wheel below, not in cash received.</p>
         {creditDue > 0 && <p className="mt-4 rounded-xl bg-accent/10 p-3 text-xs font-bold text-accent">All unpaid credit: {money(creditDue)} · collect it below.</p>}
       </section>
     </div>
@@ -716,6 +721,8 @@ function InsightsView({ sales, catalog, settings, onOpenBill, onCollectCredit }:
         {creditSales.length > 30 && <p className="p-3 text-center text-xs text-muted-foreground">Showing the 30 most recent unpaid bills. To collect from an older bill, select its date range in Saved bills below.</p>}
       </div>
     </section>}
+    <MoneyOverview sales={sales} start={rangeStart} end={rangeEnd} label={periodLabels[period]} />
+    <InventoryInsights catalog={catalog} sales={sales} />
     <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]">
        <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6"><div className="flex items-center justify-between"><div><p className="text-xs font-bold text-muted-foreground">Top sellers</p><h3 className="mt-1 text-lg font-extrabold">Customers came for these</h3></div><span className="rounded-lg bg-chart-3/12 px-2 py-1 text-[10px] font-bold text-chart-3">{periodLabels[period]}</span></div><div className="mt-5 space-y-4">{productTotals.length ? productTotals.slice(0, 4).map(({ name, qty }, index) => <div key={`${name}-${index}`} className="flex items-center gap-3"><span className="font-mono-app text-[10px] text-muted-foreground">0{index + 1}</span><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/8 text-[10px] font-extrabold text-primary">{initials(name)}</span><span className="flex-1 text-xs font-bold">{name}</span><span className="text-xs font-extrabold">{qty} sold</span><div className="hidden h-1.5 w-20 overflow-hidden rounded-full bg-muted sm:block"><div className="h-full rounded-full bg-primary" style={{ width: `${qty / productTotals[0].qty * 100}%` }} /></div></div>) : <p className="text-xs text-muted-foreground">No products sold in this period.</p>}</div></section>
       <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6"><div className="flex items-center justify-between gap-2"><div><p className="text-xs font-bold text-muted-foreground">Inventory snapshot</p><h3 className="mt-1 text-lg font-extrabold">Worth keeping an eye on</h3></div><span className="rounded-lg bg-chart-4/20 px-2 py-1 text-[10px] font-bold">{trackedStock.length ? `${money(stockValue)} value` : 'Stock not tracked'}</span></div><div className="mt-5 space-y-3">{alerts.map(({ product, variant }) => <div key={`${product.id}-${variant.id}`} className="flex items-center gap-3 rounded-xl bg-accent/7 p-3"><AlertTriangle size={16} className="text-accent" /><div className="flex-1"><p className="text-xs font-bold">{product.name}</p><p className="mt-0.5 text-[10px] text-muted-foreground">{variant.name} · threshold {variant.threshold ?? 0}</p></div><span className="font-mono-app text-xs font-bold text-accent">{variant.stock} left</span></div>)}{trackedStock.length > 0 && alerts.length === 0 && <div className="rounded-xl bg-chart-3/10 p-4 text-xs font-bold text-chart-3">No urgent stock alerts. Nice work.</div>}{trackedStock.length === 0 && <p className="text-xs text-muted-foreground">Add stock quantities to your catalog to see inventory value and alerts.</p>}</div></section>

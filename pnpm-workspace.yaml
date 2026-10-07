@@ -1,17 +1,3 @@
-# ============================================================================
-# SECURITY: Minimum release age for npm packages (supply-chain attack defense)
-# ============================================================================
-#
-# Require package releases to be at least one day old before installing. Keep
-# this protection enabled; only use the trusted-package allowlist for urgent,
-# reviewed exceptions.
-minimumReleaseAge: 1440
-
-minimumReleaseAgeExclude:
-  # Replit-published packages are excluded from the release-age check.
-  - '@replit/*'
-  - stripe-replit-sync
-
 packages:
   - artifacts/*
   - lib/*
@@ -35,7 +21,6 @@ catalog:
   drizzle-orm: ^0.45.2
   framer-motion: ^12.23.24
   lucide-react: ^0.545.0
-  # Keep exact versions because Expo requires them.
   react: 19.1.0
   react-dom: 19.1.0
   tailwind-merge: ^3.3.1
@@ -44,6 +29,12 @@ catalog:
   vite: ^7.3.2
   wouter: ^3.3.5
   zod: ^3.25.76
+
+minimumReleaseAge: 1440
+
+minimumReleaseAgeExclude:
+  - '@replit/*'
+  - stripe-replit-sync
 
 onlyBuiltDependencies:
   - '@swc/core'
@@ -73,6 +64,7 @@ overrides:
   '@tailwindcss/oxide>@tailwindcss/oxide-linux-x64-musl': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-win32-arm64-msvc': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-win32-x64-msvc': '-'
+  brace-expansion@>=4.0.0 <5.0.12: 5.0.12
   esbuild: 0.28.2
   esbuild>@esbuild/aix-ppc64: '-'
   esbuild>@esbuild/android-arm: '-'
@@ -99,6 +91,7 @@ overrides:
   esbuild>@esbuild/win32-arm64: '-'
   esbuild>@esbuild/win32-ia32: '-'
   esbuild>@esbuild/win32-x64: '-'
+  fast-uri: 3.1.8
   js-yaml: 4.3.2
   lightningcss>lightningcss-android-arm64: '-'
   lightningcss>lightningcss-darwin-arm64: '-'
@@ -110,6 +103,8 @@ overrides:
   lightningcss>lightningcss-linux-x64-musl: '-'
   lightningcss>lightningcss-win32-arm64-msvc: '-'
   lightningcss>lightningcss-win32-x64-msvc: '-'
+  postcss-selector-parser@<7.1.6: 7.1.6
+  proxy-addr: 2.0.8
   rollup>@rollup/rollup-android-arm-eabi: '-'
   rollup>@rollup/rollup-android-arm64: '-'
   rollup>@rollup/rollup-darwin-arm64: '-'
@@ -134,3 +129,8 @@ overrides:
   rollup>@rollup/rollup-win32-ia32-msvc: '-'
   rollup>@rollup/rollup-win32-x64-gnu: '-'
   rollup>@rollup/rollup-win32-x64-msvc: '-'
+  source-map-js: 1.2.2
+  uuid@>=9.0.0 <11.1.1: 11.1.1
+
+patchedDependencies:
+  braces@3.0.3: patches/braces@3.0.3.patch

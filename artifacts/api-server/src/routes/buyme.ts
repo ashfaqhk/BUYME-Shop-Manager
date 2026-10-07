@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { db, buymeImagesTable, buymeMembershipsTable, buymeShopsTable } from "@workspace/db";
 import { ObjectNotFoundError, ObjectStorageService } from "../lib/objectStorage";
+import { canonicalHistory, historyStart, historyVisible, mergeHistory } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
@@ -67,7 +68,8 @@ async function accountMembership(current: NonNullable<Awaited<ReturnType<typeof 
 function responseFor(shop: typeof buymeShopsTable.$inferSelect, role: string, email: string, isCompanyAdmin = false) {
   return {
     shopId: shop.id, email, role, isCompanyAdmin, shopName: shop.name,
-    catalog: shop.catalog, sales: shop.sales, settings: shop.settings,
+    catalog: shop.catalog, sales: (shop.sales as unknown[]).filter((sale) => historyVisible(sale, historyStart(shop.premiumApproved))), settings: shop.settings,
+    historyStart: historyStart(shop.premiumApproved), historyMonths: shop.premiumApproved ? 24 : 2,
     premiumApproved: shop.premiumApproved, mode: shop.premiumApproved ? "full" : "basic",
     accessEnabled: shop.accessEnabled, upgradeRequestedAt: shop.upgradeRequestedAt,
     revision: shop.revision,
@@ -106,7 +108,7 @@ router.put("/shop", async (req, res): Promise<void> => {
   if (!currentShop.shop.accessEnabled) { res.status(403).json({ error: "Your shop access is paused. Contact the BUYME company administrator." }); return; }
   const [updated] = await db.update(buymeShopsTable).set({
     catalog: parsed.data.catalog,
-    sales: parsed.data.sales,
+    sales: mergeHistory(currentShop.shop.sales as unknown[], parsed.data.sales),
     settings: parsed.data.settings,
     name: typeof parsed.data.settings.shopName === "string" ? parsed.data.settings.shopName.slice(0, 120) : currentShop.shop.name,
     revision: currentShop.shop.revision + 1,
@@ -114,6 +116,25 @@ router.put("/shop", async (req, res): Promise<void> => {
   }).where(and(eq(buymeShopsTable.id, currentShop.shop.id), eq(buymeShopsTable.revision, parsed.data.revision), eq(buymeShopsTable.accessEnabled, true))).returning();
   if (!updated) { res.status(409).json({ error: "The cloud shop changed. Your device copy is preserved; sync again to reconcile both copies." }); return; }
   res.json(responseFor(updated, currentShop.role, current.email));
+});
+
+router.post("/shop/history-refresh", async (req, res): Promise<void> => {
+  const current = await session(req);
+  if (!current) { res.status(401).json({ error: "Sign in to reconcile saved history." }); return; }
+  const assigned = await accountMembership(current);
+  if (!assigned || !assigned.shop.accessEnabled) { res.status(403).json({ error: "Enabled shop membership is required." }); return; }
+  const parsed = z.object({ revision: z.number().int().positive(), records: z.array(z.object({
+    id: z.string().min(1).max(200), fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  })).max(100000) }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "Invalid saved-history fingerprints." }); return; }
+  if (assigned.shop.revision !== parsed.data.revision) { res.status(409).json({ error: "Shop changed; retry history reconciliation." }); return; }
+  const known = new Map(parsed.data.records.map((row) => [row.id, row.fingerprint]));
+  const sales = (assigned.shop.sales as unknown[]).filter((row) => {
+    if (!row || typeof row !== "object" || !("id" in row) || typeof row.id !== "string" || !known.has(row.id)) return false;
+    return createHash("sha256").update(canonicalHistory(row)).digest("hex") !== known.get(row.id);
+  });
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ sales });
 });
 
 router.post("/shop/upgrade-request", async (req, res): Promise<void> => {

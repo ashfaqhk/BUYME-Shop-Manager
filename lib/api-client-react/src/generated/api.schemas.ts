@@ -47,6 +47,14 @@ export interface SellerShopSaveInput {
   revision: number;
 }
 
+export type SellerShopDocumentHistoryMonths = typeof SellerShopDocumentHistoryMonths[keyof typeof SellerShopDocumentHistoryMonths];
+
+
+export const SellerShopDocumentHistoryMonths = {
+  NUMBER_2: 2,
+  NUMBER_24: 24,
+} as const;
+
 export type SellerShopDocumentMode = typeof SellerShopDocumentMode[keyof typeof SellerShopDocumentMode];
 
 
@@ -58,6 +66,8 @@ export const SellerShopDocumentMode = {
 export type SellerShopDocumentSettings = { [key: string]: unknown };
 
 export interface SellerShopDocument {
+  historyStart?: string;
+  historyMonths?: SellerShopDocumentHistoryMonths;
   /** @nullable */
   shopId: string | null;
   shopName: string;
@@ -76,12 +86,36 @@ export interface SellerShopDocument {
   isNew?: boolean;
 }
 
+/**
+ * Uploads retain all history. New downloads include the last 2 calendar months for Basic or 24 months for Premium, plus unpaid bills and recent collections.
+ */
 export interface ShopAccessDocument {
   id: string;
   premiumApproved: boolean;
   accessEnabled: boolean;
   /** @nullable */
   upgradeRequestedAt: string | null;
+}
+
+export interface SavedHistoryFingerprint {
+  /** @maxLength 200 */
+  id: string;
+  /**
+     * @minLength 64
+     * @maxLength 64
+     */
+  fingerprint: string;
+}
+
+export interface SavedHistoryInput {
+  /** @minimum 1 */
+  revision: number;
+  /** @maxItems 100000 */
+  records: SavedHistoryFingerprint[];
+}
+
+export interface SavedHistoryDocument {
+  sales: unknown[];
 }
 
 export type CompanySellerDocumentMembersItem = {

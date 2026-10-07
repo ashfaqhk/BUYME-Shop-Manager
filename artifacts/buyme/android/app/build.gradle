@@ -4,15 +4,15 @@ plugins {
 
 android {
     namespace "app.buyme.shopmanager"
-    compileSdk 35
+    compileSdk 36
     buildToolsVersion "35.0.0"
 
     defaultConfig {
         applicationId "app.buyme.shopmanager"
         minSdk 23
-        targetSdk 35
-        versionCode 3
-        versionName "1.2"
+        targetSdk 36
+        versionCode 4
+        versionName "1.3"
     }
 }
 

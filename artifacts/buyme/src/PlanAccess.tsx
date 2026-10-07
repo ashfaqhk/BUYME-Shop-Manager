@@ -70,7 +70,7 @@ export default function PlanAccess({ variant = "button", mode, premiumApproved, 
         <p className="text-xs font-bold uppercase tracking-widest text-primary">Plan</p>
         <h3 className="mt-2 text-lg font-extrabold">{premiumApproved ? "Premium access approved" : "Basic plan"}</h3>
         <p className="mt-1 text-sm leading-6 text-muted-foreground">
-          {premiumApproved ? `You are using the ${mode === "full" ? "Full" : "Basic"} interface. Your shop data is the same in both.` : waiting ? `Full access requested${when(requestedAt) ? ` on ${when(requestedAt)}` : ""}. Waiting for BUYME approval.` : "Basic covers billing, your catalog and PDF data reports. Full adds alerts, broadcast and individual bill receipts."}
+          {premiumApproved ? `You are using the ${mode === "full" ? "Full" : "Basic"} interface. Your shop data is the same in both.` : waiting ? `Full access requested${when(requestedAt) ? ` on ${when(requestedAt)}` : ""}. Waiting for BUYME approval.` : "Basic covers billing and your catalog. Full adds Insights, Settings, PDF reports, alerts and individual bill receipts."}
         </p>
         <div className="mt-4">{control}</div>
       </section>
